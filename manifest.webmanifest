@@ -1,0 +1,16 @@
+{
+  "name": "隨手掃描",
+  "short_name": "隨手掃描",
+  "description": "拍照變乾淨的 PDF：自動拉正、去陰影、去手寫，沒有浮水印",
+  "start_url": "./?src=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#0f766e",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
