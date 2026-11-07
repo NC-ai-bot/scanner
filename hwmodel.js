@@ -47,7 +47,7 @@ async function handwritingMask(img, onStatus){
   const logits = out[Object.keys(out)[0]].data;
   // mask at model resolution → RGBA canvas (white where handwriting), slightly grown
   const mask = new Uint8Array(n);
-  for (let i = 0; i < n; i++) mask[i] = logits[i] > -0.6 ? 1 : 0;   // p > 0.35
+  for (let i = 0; i < n; i++) mask[i] = logits[i] > -0.85 ? 1 : 0;   // p ≈ 0.3
   const grown = new Uint8Array(n);
   for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++){
     const p = yy * w + xx; if (!mask[p]) continue;
