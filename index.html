@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>隨手掃描</title>
 <meta name="theme-color" content="#0f766e">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -13,19 +13,20 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <script src="jspdf.umd.min.js"></script>
 <style>
-  :root{
-    --accent:#0f766e; --accent-2:#14b8a6; --bg:#f3f4f6; --card:#fff; --ink:#111827; --muted:#6b7280; --line:#e5e7eb; --danger:#dc2626;
-  }
+  :root{ --accent:#0f766e; --accent-2:#14b8a6; --bg:#f3f4f6; --card:#fff; --ink:#111827; --muted:#6b7280; --line:#e5e7eb; --danger:#dc2626; }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
-  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--ink);-webkit-tap-highlight-color:transparent}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--ink);-webkit-tap-highlight-color:transparent;padding-top:env(safe-area-inset-top)}
   button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
   button:disabled{opacity:.35;cursor:default}
   .hidden{display:none!important}
 
-  header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 16px 8px;display:flex;align-items:baseline;gap:10px}
+  header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 16px 8px;display:flex;align-items:center;gap:10px}
   header h1{font-size:20px;margin:0;letter-spacing:.5px}
-  header .count{color:var(--muted);font-size:14px}
+  header .count{color:var(--muted);font-size:14px;flex:1}
+  .eng{font-size:12px;color:var(--muted);background:#e5e7eb;border-radius:999px;padding:4px 10px}
+  .eng.ok{background:#ccfbf1;color:#0f766e}
+  .eng.bad{background:#fee2e2;color:#991b1b}
   main{padding:0 16px 150px;max-width:900px;margin:0 auto}
 
   .empty{background:var(--card);border-radius:16px;padding:28px 20px;text-align:center;margin-top:8px;border:1px dashed #cbd5e1}
@@ -34,9 +35,10 @@
   .empty p{color:var(--muted);font-size:14px;line-height:1.7;margin:0}
 
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-top:8px}
-  .card{background:var(--card);border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  .card{background:var(--card);border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);position:relative}
   .card .thumb{display:block;width:100%;aspect-ratio:3/4;background:#e5e7eb;padding:0}
   .card .thumb img{width:100%;height:100%;object-fit:contain;display:block}
+  .card.working .thumb::after{content:"處理中…";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.6);font-size:13px;color:var(--muted)}
   .cbar{display:flex;align-items:center;justify-content:space-between;padding:4px 6px;font-size:13px;color:var(--muted)}
   .cbar button{width:34px;height:30px;border-radius:8px;font-size:20px;line-height:1}
   .cbar button:active{background:var(--line)}
@@ -61,7 +63,7 @@
   .dock input{display:none}
 
   /* editor */
-  .editor{position:fixed;inset:0;z-index:20;background:#0b0f14;color:#fff;display:flex;flex-direction:column}
+  .editor{position:fixed;inset:0;z-index:20;background:#0b0f14;color:#fff;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
   .ebar{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;flex:none}
   .ebar .t{font-weight:600}
   .txtbtn{padding:8px 12px;border-radius:10px;font-size:16px;color:#cbd5e1}
@@ -77,6 +79,7 @@
   .tbtn{background:#1f2937;color:#e5e7eb;padding:10px 16px;border-radius:12px;font-size:15px}
   .tbtn:active{background:#374151}
   .tbtn.danger{color:#fca5a5}
+  .tbtn.sm{padding:6px 12px;font-size:14px}
   .hint{font-size:13px;color:#9ca3af}
   .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
   .chip{padding:9px 16px;border-radius:999px;background:#1f2937;color:#e5e7eb;font-size:15px}
@@ -85,21 +88,38 @@
   .hwrow .lab{font-size:13px;color:#9ca3af;margin-right:2px}
   .chip.tog{padding:7px 13px;font-size:14px;background:#111827;border:1px solid #374151}
   .chip.tog.on{background:#fbbf24;color:#422006;border-color:#fbbf24}
+  .chip.tog.ai{border-color:#a78bfa;color:#ddd6fe}
   .slrow{display:flex;align-items:center;gap:10px;font-size:14px;color:#d1d5db;flex-wrap:wrap;justify-content:center}
   .slrow input[type=range]{width:160px;accent-color:#fbbf24}
-  .tbtn.sm{padding:6px 12px;font-size:14px}
-  .chip.tog.ai{border-color:#a78bfa;color:#ddd6fe}
   #aiInfo{color:#fdba74}
-  .busy .cancel{margin-left:6px;color:var(--accent);font-size:14px;padding:4px 8px}
+
+  /* camera */
+  .cam{position:fixed;inset:0;z-index:30;background:#000;color:#fff;display:flex;flex-direction:column}
+  .cam .view{flex:1;position:relative;overflow:hidden;min-height:0;display:flex;align-items:center;justify-content:center}
+  .cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+  .cam #camOverlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .cam .top{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:calc(10px + env(safe-area-inset-top)) 12px 10px;background:linear-gradient(rgba(0,0,0,.55),transparent)}
+  .cam .status{font-size:14px;color:#e5e7eb;background:rgba(0,0,0,.45);padding:6px 12px;border-radius:999px}
+  .cam .bottom{flex:none;display:flex;align-items:center;justify-content:space-around;padding:14px 16px calc(18px + env(safe-area-inset-bottom));background:#000}
+  .shutter{width:76px;height:76px;border-radius:50%;background:#fff;border:5px solid #9ca3af;box-shadow:0 0 0 3px #000 inset}
+  .shutter:active{transform:scale(.94)}
+  .camside{width:84px;display:flex;flex-direction:column;align-items:center;gap:4px;font-size:12px;color:#d1d5db}
+  .camside .ico{font-size:22px}
+  .camside.on .ico{color:#5eead4}
+  .lastshot{width:56px;height:56px;border-radius:10px;background:#1f2937;overflow:hidden;position:relative}
+  .lastshot img{width:100%;height:100%;object-fit:cover;display:block}
+  .lastshot .n{position:absolute;right:-4px;top:-4px;background:var(--accent-2);color:#042f2e;font-weight:700;font-size:12px;border-radius:999px;min-width:20px;height:20px;display:flex;align-items:center;justify-content:center;padding:0 5px}
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
 
   .busy{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}
   .busy .b{background:#fff;color:var(--ink);border-radius:14px;padding:18px 22px;display:flex;align-items:center;gap:12px;font-size:15px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  .busy .cancel{margin-left:6px;color:var(--accent);font-size:14px;padding:4px 8px}
   .spin{width:22px;height:22px;border:3px solid #e5e7eb;border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
   .sheetbg{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.4);display:flex;align-items:flex-end;justify-content:center}
   .sheet{background:#fff;width:100%;max-width:480px;border-radius:18px 18px 0 0;padding:18px 16px calc(16px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:10px}
   .sh-title{font-weight:700;font-size:17px;text-align:center}
-  .sh-name{color:var(--muted);font-size:13px;text-align:center;word-break:break-all;margin-bottom:4px}
+  .sh-name{color:var(--muted);font-size:13px;text-align:center;word-break:break-all;margin-bottom:4px;line-height:1.6}
   .sh-btn{height:50px;border-radius:12px;background:#f3f4f6;font-size:16px}
   .sh-btn.primary{background:var(--accent);color:#fff;font-weight:600}
   .sh-btn.ghost{background:none;color:var(--muted)}
@@ -107,13 +127,13 @@
 </style>
 </head>
 <body>
-<header><h1>隨手掃描</h1><span class="count" id="count"></span></header>
+<header><h1>隨手掃描</h1><span class="count" id="count"></span><span class="eng" id="eng">影像引擎載入中…</span></header>
 
 <main>
   <div class="empty" id="empty">
     <div class="big">📄</div>
     <h2>拍下紙張，變成乾淨的 PDF</h2>
-    <p>按下方「拍照」或「相簿」加入頁面。<br>會自動找出紙張四角、拉正、去陰影，<br>還能去掉藍紅筆和鉛筆的手寫字，<br>最後匯出 PDF，沒有浮水印。</p>
+    <p>按下方「拍照」或「相簿」加入頁面。<br>自動找出紙張、拉正、去陰影，<br>還能去掉藍紅筆和鉛筆的手寫字，<br>匯出 PDF，沒有浮水印。</p>
   </div>
 
   <div class="grid" id="grid"></div>
@@ -123,7 +143,7 @@
   <details class="panel" id="settings">
     <summary>設定</summary>
     <div class="field"><span>檔名</span><input id="fname" type="text"></div>
-    <div class="field"><span>預設濾鏡</span>
+    <div class="field"><span>預設效果</span>
       <select id="defFilter">
         <option value="enhance">增強（推薦）</option>
         <option value="bw">黑白（考卷、講義）</option>
@@ -133,12 +153,18 @@
     </div>
     <div class="field"><span>預設去手寫</span>
       <select id="defHw">
-        <option value="none">不去除</option>
         <option value="color">去藍／紅筆</option>
         <option value="both">去藍／紅筆＋鉛筆</option>
+        <option value="none">不去除</option>
       </select>
     </div>
-    <div class="field"><span></span><button class="linkbtn" id="applyAll">把濾鏡和去手寫套用到所有頁面</button></div>
+    <div class="field"><span>自動連拍</span>
+      <select id="autoShot">
+        <option value="on">對準紙張自動拍</option>
+        <option value="off">手動按快門</option>
+      </select>
+    </div>
+    <div class="field"><span></span><button class="linkbtn" id="applyAll">用目前設定重新處理所有頁面</button></div>
     <div class="field"><span>PDF 頁面</span>
       <select id="pageSize">
         <option value="a4">A4（自動直橫）</option>
@@ -154,17 +180,34 @@
     <div class="field"><span></span><button class="dangerbtn" id="clearAll">清除全部頁面</button></div>
   </details>
 
-  <p class="note" id="note">掃描的頁面只留在這個分頁裡，重新整理或關閉就會清空，記得先匯出。照片只在你的裝置上處理，不會上傳。</p>
+  <p class="note" id="note">掃描的頁面會存在這台裝置上，關掉再開還在。照片只在你的裝置上處理，不會上傳。</p>
 </main>
 
 <div class="dock">
   <div class="inner">
-    <label><input type="file" id="camInput" accept="image/*" capture="environment"><span class="ico">📷</span>拍照</label>
+    <button id="camBtn"><span class="ico">📷</span>拍照</button>
+    <label id="camLabel" class="hidden"><input type="file" id="camInput" accept="image/*" capture="environment"><span class="ico">📷</span>拍照</label>
     <label><input type="file" id="libInput" accept="image/*" multiple><span class="ico">🖼️</span>相簿</label>
     <button class="primary" id="exportBtn" disabled><span class="ico">⬇︎</span>匯出 PDF</button>
   </div>
 </div>
 
+<!-- live camera -->
+<div class="cam hidden" id="cam">
+  <div class="view">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="camOverlay"></canvas>
+    <div class="flash" id="flash"></div>
+    <div class="top"><button class="txtbtn" id="camClose">關閉</button><span class="status" id="camStatus">尋找紙張中…</span><button class="txtbtn strong" id="camDone">完成</button></div>
+  </div>
+  <div class="bottom">
+    <button class="camside" id="camAuto"><span class="ico">◎</span><span>自動拍</span></button>
+    <button class="shutter" id="shutter" aria-label="拍照"></button>
+    <div class="camside"><div class="lastshot" id="lastshot"><span class="n hidden" id="shotN">0</span></div></div>
+  </div>
+</div>
+
+<!-- editor -->
 <div class="editor hidden" id="editor">
   <div class="ebar">
     <button class="txtbtn" id="eBack">返回</button>
@@ -188,9 +231,9 @@
       <button class="chip tog" id="hwErase">✎ 橡皮擦</button>
       <button class="chip tog ai hidden" id="hwAI">✨ AI 去手寫</button>
     </div>
-    <div class="slrow hidden" id="aiRow"><span id="aiInfo"></span><button class="tbtn sm" id="aiClear">全部還原</button></div>
-    <div class="slrow hidden" id="pencilRow"><span>鉛筆去除強度</span><input type="range" id="pencilT" min="25" max="70" value="40"><span class="hint">太強會吃掉印刷字</span></div>
+    <div class="slrow hidden" id="pencilRow"><span>鉛筆去除強度</span><input type="range" id="pencilT" min="25" max="70" value="45"><span class="hint">太強會吃掉淡的印刷字</span></div>
     <div class="slrow hidden" id="eraseRow"><span>筆刷</span><input type="range" id="brush" min="4" max="40" value="12"><button class="tbtn sm" id="undoStroke">↶ 復原</button></div>
+    <div class="slrow hidden" id="aiRow"><span id="aiInfo"></span><button class="tbtn sm" id="aiClear">全部還原</button></div>
     <div class="row">
       <button class="tbtn" id="tRot">↻ 旋轉</button>
       <button class="tbtn" id="tSaveImg">存成圖片</button>
@@ -204,7 +247,7 @@
 
 <div class="sheetbg hidden" id="sheet">
   <div class="sheet">
-    <div class="sh-title">檔案準備好了</div>
+    <div class="sh-title" id="shTitle">檔案準備好了</div>
     <div class="sh-name" id="shName"></div>
     <button class="sh-btn primary" id="shShare">分享／存到「檔案」</button>
     <button class="sh-btn" id="shDown">下載</button>
@@ -217,14 +260,126 @@
 'use strict';
 const $ = s => document.querySelector(s);
 const MAX_SRC = 2400;   // working copy of the photo
-const OUT_MAX = 2200;   // stored scan resolution
-const PREV_MAX = 1400;  // editor preview resolution
+const OUT_MAX = 2000;   // stored scan resolution
+const PREV_MAX = 1300;  // editor preview resolution
 const FILTERS = [{id:'original',name:'原圖'},{id:'enhance',name:'增強'},{id:'gray',name:'灰階'},{id:'bw',name:'黑白'}];
+const CLAUDE_URL = 'https://claude.ai/artifact/U91zTDhgKzjACF264YRVuK';
 
 const state = { pages: [], seq: 0 };
-let downloadsApi; // undefined = unknown, null = unavailable
 const inClaude = !!(window.claude && window.claude.use);
-const CLAUDE_URL = 'https://claude.ai/artifact/U91zTDhgKzjACF264YRVuK';
+let downloadsApi;          // Claude: undefined = unknown, null = unavailable
+let sampleApi = null;      // Claude: AI
+
+/* ---------- small helpers ---------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function toast(msg, ms = 2600){
+  const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); t.style.opacity = 1;
+  clearTimeout(toast._h); toast._h = setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.classList.add('hidden'), 260); }, ms);
+}
+async function busy(text){ $('#busyText').textContent = text; $('#busy').classList.remove('hidden'); await sleep(30); }
+function done(){ $('#busy').classList.add('hidden'); $('#busyCancel').classList.add('hidden'); }
+function freeCanvas(c){ if (c){ c.width = 0; c.height = 0; } }
+function canvasToBlob(c, type = 'image/jpeg', q = 0.9){ return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('encode failed')), type, q)); }
+function blobToImage(blob){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob); const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('無法讀取圖片')); };
+    img.src = url;
+  });
+}
+async function blobToCanvas(blob, maxSide = Infinity){
+  const img = await blobToImage(blob);
+  const w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, maxSide / Math.max(w, h));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+  const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, c.width, c.height); return c;
+}
+const getData = c => c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height);
+function imgToCanvas(img){ // plain {data,width,height} or ImageData → canvas
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const id = img instanceof ImageData ? img : new ImageData(img.data, img.width, img.height);
+  c.getContext('2d').putImageData(id, 0, 0); return c;
+}
+function cloneImg(img){ return { data: new Uint8ClampedArray(img.data), width: img.width, height: img.height }; }
+function defaultName(){
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `掃描_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+}
+function defaultHw(){ const v = $('#defHw').value; return { color: v !== 'none', pencil: v === 'both', pencilT: 0.45 }; }
+function safeName(){ const n = ($('#fname').value || '').trim().replace(/[\\/:*?"<>|]+/g, '_'); return n || defaultName(); }
+function fullQuad(W, H, inset = 0){ const ix = W * inset, iy = H * inset; return [{x:ix,y:iy},{x:W-ix,y:iy},{x:W-ix,y:H-iy},{x:ix,y:H-iy}]; }
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function isConvex(q){
+  let sign = 0;
+  for (let i = 0; i < 4; i++){
+    const a = q[i], b = q[(i+1)%4], c = q[(i+2)%4], cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    if (Math.abs(cr) < 1e-6) return false; const s = Math.sign(cr); if (!sign) sign = s; else if (s !== sign) return false;
+  }
+  return true;
+}
+
+/* ---------- image engine (OpenCV in a worker, main-thread fallback) ---------- */
+const CV = (() => {
+  let worker = null, seq = 0, pending = new Map(), ready = null, mode = 'none';
+  function setEng(txt, cls){ const e = $('#eng'); e.textContent = txt; e.className = 'eng ' + (cls || ''); }
+  function call(op, img, extra = {}){
+    if (mode === 'worker'){
+      return new Promise((res, rej) => {
+        const id = ++seq; pending.set(id, { res, rej });
+        const plain = img ? { data: img.data, width: img.width, height: img.height } : null;
+        const transfer = plain && plain.data.buffer ? [plain.data.buffer] : [];
+        worker.postMessage({ id, op, img: plain, ...extra }, transfer);
+      });
+    }
+    return new Promise((res, rej) => { try {
+      if (op === 'detect') res(CVPipe.detect(img));
+      else if (op === 'warp') res(CVPipe.warp(img, extra.quad, extra.maxSide));
+      else if (op === 'process') res(CVPipe.process(img, extra.opts));
+      else if (op === 'scan'){ const w = CVPipe.warp(img, extra.quad, extra.maxSide); res({ warped: w, out: CVPipe.process(w, extra.opts) }); }
+      else rej(new Error('unknown op'));
+    } catch (e){ rej(e); } });
+  }
+  function loadScript(src){ return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error('load ' + src)); document.head.appendChild(s); }); }
+  async function initMain(){
+    await loadScript('opencv.js'); await loadScript('cvpipe.js');
+    let m = window.cv; if (m && typeof m.then === 'function') m = await m; else if (m && m.ready) m = await m.ready;
+    if (!m || !m.Mat) throw new Error('opencv');
+    CVPipe.use(m); mode = 'main';
+  }
+  function initWorker(){
+    return new Promise((res, rej) => {
+      let w;
+      try { w = new Worker('cvworker.js'); } catch (e){ rej(e); return; }
+      const timer = setTimeout(() => { try { w.terminate(); } catch (e) {} rej(new Error('worker timeout')); }, 90000);
+      w.onerror = e => { clearTimeout(timer); rej(new Error(e.message || 'worker error')); };
+      w.onmessage = e => {
+        const { id, ok, res: r, err } = e.data;
+        if (id === 0){ clearTimeout(timer); if (ok){ worker = w; mode = 'worker'; w.onerror = ev => console.error(ev); res(); } else rej(new Error(err)); return; }
+        const p = pending.get(id); if (!p) return; pending.delete(id);
+        ok ? p.res(r) : p.rej(new Error(err));
+      };
+      w.postMessage({ id: 0, op: 'ping' });
+    });
+  }
+  function init(){
+    if (ready) return ready;
+    ready = (async () => {
+      setEng('影像引擎載入中…');
+      try { await initWorker(); }
+      catch (e){ console.warn('worker failed, falling back', e); try { await initMain(); } catch (e2){ setEng('影像引擎載入失敗', 'bad'); throw e2; } }
+      setEng('引擎就緒', 'ok'); setTimeout(() => $('#eng').classList.add('hidden'), 2500);
+    })();
+    return ready;
+  }
+  return {
+    init,
+    detect: async img => { await init(); return call('detect', img); },
+    warp: async (img, quad, maxSide) => { await init(); return call('warp', img, { quad, maxSide }); },
+    process: async (img, opts) => { await init(); return call('process', img, { opts }); },
+    scan: async (img, quad, maxSide, opts) => { await init(); return call('scan', img, { quad, maxSide, opts }); },
+  };
+})();
 
 /* ---------- keep pages on this device (IndexedDB) ---------- */
 const store = { db: null, ok: false, timer: null };
@@ -245,7 +400,7 @@ async function persistNow(){
     const tx = store.db.transaction(['pages', 'meta'], 'readwrite'), ps = tx.objectStore('pages');
     const keep = new Set(state.pages.map(p => p.id));
     for (const p of state.pages){
-      if (!p._dirty) continue;
+      if (!p._dirty || !p.outBlob) continue;
       const rec = {}; for (const k of PAGE_KEYS) rec[k] = p[k]; ps.put(rec); p._dirty = false;
     }
     const keys = await idbReq(ps.getAllKeys());
@@ -263,341 +418,14 @@ async function restore(){
     const byId = new Map(recs.map(r => [r.id, r]));
     for (const id of order){
       const r = byId.get(id); if (!r || !r.srcBlob || !r.outBlob) continue;
-      const p = { ...r, strokes: r.strokes || [], aiBoxes: r.aiBoxes || [], hw: r.hw || { color: false, pencil: false, pencilT: 0.4 } };
+      const p = { ...r, strokes: r.strokes || [], aiBoxes: r.aiBoxes || [], hw: r.hw || { color: false, pencil: false, pencilT: 0.45 } };
       p.thumbUrl = URL.createObjectURL(r.thumbBlob || r.outBlob);
       state.pages.push(p); state.seq = Math.max(state.seq, p.id);
     }
   } catch (e){ console.error(e); }
 }
 
-/* ---------- small helpers ---------- */
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-function toast(msg, ms = 2600){
-  const t = $('#toast'); t.textContent = msg; t.classList.remove('hidden'); t.style.opacity = 1;
-  clearTimeout(toast._h); toast._h = setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.classList.add('hidden'), 260); }, ms);
-}
-async function busy(text){ $('#busyText').textContent = text; $('#busy').classList.remove('hidden'); await sleep(30); }
-function done(){ $('#busy').classList.add('hidden'); $('#busyCancel').classList.add('hidden'); }
-function freeCanvas(c){ if (c){ c.width = 0; c.height = 0; } }
-function canvasToBlob(c, type = 'image/jpeg', q = 0.9){
-  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('encode failed')), type, q));
-}
-function blobToImage(blob){
-  return new Promise((res, rej) => {
-    const url = URL.createObjectURL(blob); const img = new Image();
-    img.onload = () => { URL.revokeObjectURL(url); res(img); };
-    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('無法讀取圖片')); };
-    img.src = url;
-  });
-}
-async function blobToCanvas(blob, maxSide = Infinity){
-  const img = await blobToImage(blob);
-  const w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, maxSide / Math.max(w, h));
-  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
-  const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, c.width, c.height); return c;
-}
-const getData = c => c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height);
-function defaultName(){
-  const d = new Date(), p = n => String(n).padStart(2, '0');
-  return `掃描_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
-}
-function defaultHw(){
-  const v = $('#defHw').value;
-  return { color: v !== 'none', pencil: v === 'both', pencilT: 0.4 };
-}
-function safeName(){
-  const n = ($('#fname').value || '').trim().replace(/[\\/:*?"<>|]+/g, '_');
-  return n || defaultName();
-}
-
-/* ---------- geometry ---------- */
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-function isConvex(q){
-  let sign = 0;
-  for (let i = 0; i < 4; i++){
-    const a = q[i], b = q[(i+1)%4], c = q[(i+2)%4];
-    const cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
-    if (Math.abs(cr) < 1e-6) return false;
-    const s = Math.sign(cr); if (!sign) sign = s; else if (s !== sign) return false;
-  }
-  return true;
-}
-function quadArea(q){
-  let s = 0; for (let i = 0; i < 4; i++){ const a = q[i], b = q[(i+1)%4]; s += a.x * b.y - b.x * a.y; }
-  return Math.abs(s) / 2;
-}
-function fullQuad(W, H, inset = 0){
-  const ix = W * inset, iy = H * inset;
-  return [{x:ix,y:iy},{x:W-ix,y:iy},{x:W-ix,y:H-iy},{x:ix,y:H-iy}];
-}
-function solve(A, b){
-  const n = b.length, M = A.map((r, i) => r.concat([b[i]]));
-  for (let c = 0; c < n; c++){
-    let piv = c;
-    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
-    [M[c], M[piv]] = [M[piv], M[c]];
-    const pv = M[c][c]; if (Math.abs(pv) < 1e-12) return null;
-    for (let r = 0; r < n; r++){
-      if (r === c) continue; const f = M[r][c] / pv; if (!f) continue;
-      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
-    }
-  }
-  return M.map((r, i) => r[n] / r[i]);
-}
-function homography(from, to){
-  const A = [], b = [];
-  for (let i = 0; i < 4; i++){
-    const {x, y} = from[i], X = to[i].x, Y = to[i].y;
-    A.push([x, y, 1, 0, 0, 0, -X*x, -X*y]); b.push(X);
-    A.push([0, 0, 0, x, y, 1, -Y*x, -Y*y]); b.push(Y);
-  }
-  return solve(A, b);
-}
-
-/* ---------- document detection ---------- */
-function boxBlur(src, w, h, r){
-  const tmp = new Float32Array(w*h), out = new Float32Array(w*h), n = 2*r + 1;
-  for (let y = 0; y < h; y++){
-    const row = y*w;
-    for (let x = 0; x < w; x++){
-      let s = 0; for (let k = -r; k <= r; k++){ const xx = x + k < 0 ? 0 : x + k >= w ? w - 1 : x + k; s += src[row + xx]; }
-      tmp[row + x] = s / n;
-    }
-  }
-  for (let y = 0; y < h; y++){
-    for (let x = 0; x < w; x++){
-      let s = 0; for (let k = -r; k <= r; k++){ const yy = y + k < 0 ? 0 : y + k >= h ? h - 1 : y + k; s += tmp[yy*w + x]; }
-      out[y*w + x] = s / n;
-    }
-  }
-  return out;
-}
-function otsu(g){
-  const hist = new Float64Array(256); for (let i = 0; i < g.length; i++) hist[g[i] | 0]++;
-  const total = g.length; let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
-  let sumB = 0, wB = 0, best = 0, th = 128;
-  for (let t = 0; t < 256; t++){
-    wB += hist[t]; if (!wB) continue; const wF = total - wB; if (!wF) break;
-    sumB += t * hist[t]; const mB = sumB / wB, mF = (sum - sumB) / wF;
-    const v = wB * wF * (mB - mF) * (mB - mF); if (v > best){ best = v; th = t; }
-  }
-  return th;
-}
-function detectQuad(src){
-  const W = src.width, H = src.height, k = Math.min(1, 360 / Math.max(W, H));
-  const w = Math.max(8, Math.round(W*k)), h = Math.max(8, Math.round(H*k));
-  const c = document.createElement('canvas'); c.width = w; c.height = h;
-  const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(src, 0, 0, w, h);
-  const d = ctx.getImageData(0, 0, w, h).data; freeCanvas(c);
-  let g = new Float32Array(w*h);
-  for (let i = 0; i < w*h; i++) g[i] = 0.299*d[i*4] + 0.587*d[i*4+1] + 0.114*d[i*4+2];
-  g = boxBlur(boxBlur(g, w, h, 2), w, h, 2);
-  const t = otsu(g);
-  const bin = new Uint8Array(w*h); for (let i = 0; i < w*h; i++) bin[i] = g[i] > t ? 1 : 0;
-  // largest bright connected component = the paper
-  const lab = new Int32Array(w*h), stack = new Int32Array(w*h);
-  let cur = 0, best = -1, bestArea = 0;
-  for (let i = 0; i < w*h; i++){
-    if (!bin[i] || lab[i]) continue;
-    cur++; let sp = 0, area = 0; stack[sp++] = i; lab[i] = cur;
-    while (sp){
-      const p = stack[--sp]; area++; const x = p % w;
-      if (x > 0 && bin[p-1] && !lab[p-1]){ lab[p-1] = cur; stack[sp++] = p-1; }
-      if (x < w-1 && bin[p+1] && !lab[p+1]){ lab[p+1] = cur; stack[sp++] = p+1; }
-      if (p >= w && bin[p-w] && !lab[p-w]){ lab[p-w] = cur; stack[sp++] = p-w; }
-      if (p < w*(h-1) && bin[p+w] && !lab[p+w]){ lab[p+w] = cur; stack[sp++] = p+w; }
-    }
-    if (area > bestArea){ bestArea = area; best = cur; }
-  }
-  const ratio = bestArea / (w*h);
-  if (best < 0 || ratio < 0.12) return fullQuad(W, H, 0.03);
-  if (ratio > 0.985) return fullQuad(W, H, 0);
-  let tl, tr, br, bl, sMin = Infinity, sMax = -Infinity, dMin = Infinity, dMax = -Infinity;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
-    if (lab[y*w + x] !== best) continue;
-    const s = x + y, df = x - y;
-    if (s < sMin){ sMin = s; tl = {x, y}; }
-    if (s > sMax){ sMax = s; br = {x, y}; }
-    if (df > dMax){ dMax = df; tr = {x, y}; }
-    if (df < dMin){ dMin = df; bl = {x, y}; }
-  }
-  const sx = W / w, sy = H / h;
-  const q = [tl, tr, br, bl].map(p => ({ x: Math.min(W, Math.max(0, (p.x + 0.5) * sx)), y: Math.min(H, Math.max(0, (p.y + 0.5) * sy)) }));
-  if (!isConvex(q) || quadArea(q) < 0.1 * W * H) return fullQuad(W, H, 0.03);
-  return q;
-}
-
-/* ---------- perspective warp ---------- */
-function warp(srcData, q, maxSide){
-  const SW = srcData.width, SH = srcData.height, sd = srcData.data;
-  let W = Math.max(dist(q[0], q[1]), dist(q[3], q[2]));
-  let H = Math.max(dist(q[0], q[3]), dist(q[1], q[2]));
-  const k = Math.min(1, maxSide / Math.max(W, H));
-  W = Math.max(16, Math.round(W*k)); H = Math.max(16, Math.round(H*k));
-  const m = homography([{x:0,y:0},{x:W,y:0},{x:W,y:H},{x:0,y:H}], q);
-  const out = new ImageData(W, H), od = out.data;
-  if (!m){ od.fill(255); return out; }
-  const [h0,h1,h2,h3,h4,h5,h6,h7] = m, maxX = SW - 1.001, maxY = SH - 1.001, row = SW*4;
-  let o = 0;
-  for (let y = 0; y < H; y++){
-    const v = y + 0.5;
-    for (let x = 0; x < W; x++){
-      const u = x + 0.5, den = h6*u + h7*v + 1;
-      let sx = (h0*u + h1*v + h2) / den - 0.5, sy = (h3*u + h4*v + h5) / den - 0.5;
-      if (sx < 0) sx = 0; else if (sx > maxX) sx = maxX;
-      if (sy < 0) sy = 0; else if (sy > maxY) sy = maxY;
-      const x0 = sx | 0, y0 = sy | 0, fx = sx - x0, fy = sy - y0;
-      const i00 = (y0*SW + x0) * 4, i10 = i00 + 4, i01 = i00 + row, i11 = i01 + 4;
-      for (let c = 0; c < 3; c++){
-        const top = sd[i00+c] + (sd[i10+c] - sd[i00+c]) * fx;
-        const bot = sd[i01+c] + (sd[i11+c] - sd[i01+c]) * fx;
-        od[o+c] = top + (bot - top) * fy;
-      }
-      od[o+3] = 255; o += 4;
-    }
-  }
-  return out;
-}
-
-/* ---------- filters (shadow removal + contrast) ---------- */
-const LUTS = {};
-function lut(id){
-  if (LUTS[id]) return LUTS[id];
-  const L = new Uint8ClampedArray(1024);
-  for (let i = 0; i < 1024; i++){
-    const n = i / 1023; let v;
-    if (id === 'bw'){ v = n <= 0.58 ? 0 : n >= 0.80 ? 1 : (n - 0.58) / 0.22; }
-    else { const t = Math.min(1, Math.max(0, (n - 0.08) / 0.78)); v = Math.pow(t, 1.25); }
-    L[i] = Math.round(v * 255);
-  }
-  return (LUTS[id] = L);
-}
-function smoothGrid(a, gw, gh, mode){
-  const out = new Float32Array(a.length);
-  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++){
-    let acc = mode === 'max' ? 0 : 0, n = 0;
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++){
-      const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= gw || yy >= gh) continue;
-      const v = a[yy*gw + xx]; if (mode === 'max'){ if (v > acc) acc = v; } else { acc += v; n++; }
-    }
-    out[y*gw + x] = mode === 'max' ? acc : acc / n;
-  }
-  return out;
-}
-// background (paper colour) estimate on a coarse grid
-function bgGrid(img){
-  const W = img.width, H = img.height, d = img.data;
-  const b = Math.max(8, Math.ceil(Math.max(W, H) / 48)), gw = Math.ceil(W / b), gh = Math.ceil(H / b);
-  let R = new Float32Array(gw*gh), G = new Float32Array(gw*gh), B = new Float32Array(gw*gh);
-  for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++){
-    let mr = 0, mg = 0, mb = 0; const x1 = Math.min(W, (gx+1)*b), y1 = Math.min(H, (gy+1)*b);
-    for (let y = gy*b; y < y1; y += 2) for (let x = gx*b; x < x1; x += 2){
-      const i = (y*W + x) * 4; if (d[i] > mr) mr = d[i]; if (d[i+1] > mg) mg = d[i+1]; if (d[i+2] > mb) mb = d[i+2];
-    }
-    const j = gy*gw + gx; R[j] = mr; G[j] = mg; B[j] = mb;
-  }
-  const sm = a => smoothGrid(smoothGrid(smoothGrid(a, gw, gh, 'max'), gw, gh, 'mean'), gw, gh, 'mean');
-  R = sm(R); G = sm(G); B = sm(B);
-  const gx0 = new Int32Array(W), gx1 = new Int32Array(W), gfx = new Float32Array(W);
-  for (let x = 0; x < W; x++){
-    let g = (x + 0.5) / b - 0.5; if (g < 0) g = 0; if (g > gw - 1) g = gw - 1;
-    gx0[x] = g | 0; gx1[x] = Math.min(gw - 1, gx0[x] + 1); gfx[x] = g - gx0[x];
-  }
-  return { R, G, B, gw, gh, b, gx0, gx1, gfx, W, H };
-}
-// fills oR/oG/oB with the interpolated paper colour for row y
-function bgRow(bg, y, oR, oG, oB){
-  const { R, G, B, gw, gh, b, gx0, gx1, gfx, W } = bg;
-  let g = (y + 0.5) / b - 0.5; if (g < 0) g = 0; if (g > gh - 1) g = gh - 1;
-  const y0 = g | 0, y1 = Math.min(gh - 1, y0 + 1), fy = g - y0, r0 = y0*gw, r1 = y1*gw;
-  for (let x = 0; x < W; x++){
-    const a = r0 + gx0[x], b2 = r0 + gx1[x], c = r1 + gx0[x], e = r1 + gx1[x], fx = gfx[x];
-    let t = R[a] + (R[b2] - R[a]) * fx, u = R[c] + (R[e] - R[c]) * fx; oR[x] = Math.max(40, t + (u - t) * fy);
-    t = G[a] + (G[b2] - G[a]) * fx; u = G[c] + (G[e] - G[c]) * fx; oG[x] = Math.max(40, t + (u - t) * fy);
-    t = B[a] + (B[b2] - B[a]) * fx; u = B[c] + (B[e] - B[c]) * fx; oB[x] = Math.max(40, t + (u - t) * fy);
-  }
-}
-/* 去手寫: colour ink (blue/red pen) and/or pencil (lighter grey than printed text) */
-function removeHandwriting(img, bg, hw){
-  if (!hw || (!hw.color && !hw.pencil)) return img;
-  const W = img.width, H = img.height, d = img.data, N = W*H;
-  const L8 = new Uint8Array(N), S8 = new Uint8Array(N), mask = new Uint8Array(N);
-  const rR = new Float32Array(W), rG = new Float32Array(W), rB = new Float32Array(W);
-  for (let y = 0; y < H; y++){
-    bgRow(bg, y, rR, rG, rB);
-    for (let x = 0; x < W; x++){
-      const p = y*W + x, i = p*4;
-      const nr = Math.min(1.2, d[i] / rR[x]), ng = Math.min(1.2, d[i+1] / rG[x]), nb = Math.min(1.2, d[i+2] / rB[x]);
-      const mx = Math.max(nr, ng, nb), mn = Math.min(nr, ng, nb), ln = 0.299*nr + 0.587*ng + 0.114*nb;
-      const s = mx - mn;
-      L8[p] = Math.min(255, ln * 255); S8[p] = Math.min(255, s * 255);
-      if (hw.color && s > 0.16 && ln < 0.97) mask[p] = 1;
-    }
-  }
-  if (hw.color){
-    // grow the colour mask into the anti-aliased halo, but never into dark neutral (printed) pixels
-    for (let pass = 0; pass < 2; pass++){
-      const add = [];
-      for (let y = 1; y < H-1; y++) for (let x = 1; x < W-1; x++){
-        const p = y*W + x; if (mask[p]) continue;
-        if (!(S8[p] > 15 || L8[p] > 150)) continue;
-        if (mask[p-1] || mask[p+1] || mask[p-W] || mask[p+W] || mask[p-W-1] || mask[p-W+1] || mask[p+W-1] || mask[p+W+1]) add.push(p);
-      }
-      for (const p of add) mask[p] = 1;
-    }
-  }
-  if (hw.pencil){
-    const T = Math.round((hw.pencilT || 0.4) * 255), INK = 0.88 * 255;
-    for (let y = 1; y < H-1; y++) for (let x = 1; x < W-1; x++){
-      const p = y*W + x; if (mask[p]) continue;
-      const v = L8[p]; if (v < T || v > INK) continue;
-      // keep the soft edge of printed strokes (next to a dark core), erase everything else that is light grey
-      if (L8[p-1] < T || L8[p+1] < T || L8[p-W] < T || L8[p+W] < T) continue;
-      mask[p] = 2;
-    }
-  }
-  for (let y = 0; y < H; y++){
-    bgRow(bg, y, rR, rG, rB);
-    for (let x = 0; x < W; x++){
-      const p = y*W + x; if (!mask[p]) continue;
-      const i = p*4; d[i] = rR[x]; d[i+1] = rG[x]; d[i+2] = rB[x];
-    }
-  }
-  return img;
-}
-function despeckle(d, W, H){
-  const dark = new Uint8Array(W*H);
-  for (let p = 0; p < W*H; p++) dark[p] = d[p*4] < 128 ? 1 : 0;
-  for (let y = 1; y < H-1; y++) for (let x = 1; x < W-1; x++){
-    const p = y*W + x; if (!dark[p]) continue;
-    const n = dark[p-1] + dark[p+1] + dark[p-W] + dark[p+W] + dark[p-W-1] + dark[p-W+1] + dark[p+W-1] + dark[p+W+1];
-    if (n <= 1){ const i = p*4; d[i] = d[i+1] = d[i+2] = 255; }
-  }
-}
-function applyFilter(img, f, bg){
-  if (f === 'original') return img;
-  const W = img.width, H = img.height, d = img.data;
-  bg = bg || bgGrid(img);
-  const L = lut(f === 'bw' ? 'bw' : 'tone'), color = f === 'enhance';
-  const rR = new Float32Array(W), rG = new Float32Array(W), rB = new Float32Array(W);
-  for (let y = 0; y < H; y++){
-    bgRow(bg, y, rR, rG, rB);
-    for (let x = 0; x < W; x++){
-      const i = (y*W + x) * 4, br = rR[x], bg = rG[x], bb = rB[x];
-      if (color){
-        d[i]   = L[Math.min(1023, (d[i]   / br * 1023) | 0)];
-        d[i+1] = L[Math.min(1023, (d[i+1] / bg * 1023) | 0)];
-        d[i+2] = L[Math.min(1023, (d[i+2] / bb * 1023) | 0)];
-      } else {
-        const lum = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2], bl = 0.299*br + 0.587*bg + 0.114*bb;
-        const v = L[Math.min(1023, (lum / bl * 1023) | 0)]; d[i] = d[i+1] = d[i+2] = v;
-      }
-    }
-  }
-  if (f === 'bw') despeckle(d, W, H);
-  return img;
-}
+/* ---------- drawing extras on the finished scan ---------- */
 function drawStrokes(ctx, strokes, W, H){
   if (!strokes || !strokes.length) return;
   const M = Math.max(W, H);
@@ -609,31 +437,22 @@ function drawStrokes(ctx, strokes, W, H){
   }
   ctx.restore();
 }
-// warped image -> finished canvas (handwriting removal, filter, eraser strokes, rotation)
-function renderScan(img, opts){
-  const bg = (opts.filter !== 'original' || (opts.hw && (opts.hw.color || opts.hw.pencil))) ? bgGrid(img) : null;
-  removeHandwriting(img, bg, opts.hw);
-  applyFilter(img, opts.filter, bg);
-  return toCanvas(img, opts.rot, opts.strokes, opts.aiBoxes, opts.showBoxes);
-}
 function drawBoxes(ctx, boxes, W, H, show){
   if (!boxes || !boxes.length) return;
   ctx.save(); ctx.fillStyle = '#fff';
   for (const b of boxes) ctx.fillRect(b.x0 * W, b.y0 * H, (b.x1 - b.x0) * W, (b.y1 - b.y0) * H);
   if (show){
     const lw = Math.max(2, Math.max(W, H) / 400);
-    ctx.strokeStyle = '#f97316'; ctx.lineWidth = lw; ctx.setLineDash([lw * 3, lw * 2]);
-    ctx.fillStyle = 'rgba(249,115,22,.10)';
+    ctx.strokeStyle = '#f97316'; ctx.lineWidth = lw; ctx.setLineDash([lw * 3, lw * 2]); ctx.fillStyle = 'rgba(249,115,22,.10)';
     for (const b of boxes){ const r = [b.x0 * W, b.y0 * H, (b.x1 - b.x0) * W, (b.y1 - b.y0) * H]; ctx.fillRect(...r); ctx.strokeRect(...r); }
   }
   ctx.restore();
 }
-function toCanvas(img, rot, strokes, boxes, showBoxes){
-  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
-  const cx = c.getContext('2d'); cx.putImageData(img, 0, 0);
-  drawStrokes(cx, strokes, c.width, c.height);
-  drawBoxes(cx, boxes, c.width, c.height, showBoxes);
-  if (!rot) return c;
+function finishCanvas(img, opts){ // processed image → rotated canvas with eraser strokes and AI boxes
+  const c = imgToCanvas(img), cx = c.getContext('2d');
+  drawStrokes(cx, opts.strokes, c.width, c.height);
+  drawBoxes(cx, opts.aiBoxes, c.width, c.height, opts.showBoxes);
+  const rot = opts.rot || 0; if (!rot) return c;
   const r = document.createElement('canvas'), sw = rot % 2 === 1;
   r.width = sw ? c.height : c.width; r.height = sw ? c.width : c.height;
   const x = r.getContext('2d'); x.translate(r.width/2, r.height/2); x.rotate(rot * Math.PI / 2); x.drawImage(c, -c.width/2, -c.height/2);
@@ -641,37 +460,52 @@ function toCanvas(img, rot, strokes, boxes, showBoxes){
 }
 
 /* ---------- pages ---------- */
-async function finalize(page, srcData){
-  const c = renderScan(warp(srcData, page.quad, OUT_MAX), page);
-  page.outW = c.width; page.outH = c.height;
-  page.outBlob = await canvasToBlob(c, 'image/jpeg', 0.9);
-  const t = document.createElement('canvas'), k = 320 / Math.max(c.width, c.height);
-  t.width = Math.max(1, Math.round(c.width * k)); t.height = Math.max(1, Math.round(c.height * k));
-  const tx = t.getContext('2d'); tx.imageSmoothingQuality = 'high'; tx.drawImage(c, 0, 0, t.width, t.height);
+async function storeResult(page, canvas){
+  page.outW = canvas.width; page.outH = canvas.height;
+  page.outBlob = await canvasToBlob(canvas, 'image/jpeg', 0.9);
+  const t = document.createElement('canvas'), k = 320 / Math.max(canvas.width, canvas.height);
+  t.width = Math.max(1, Math.round(canvas.width * k)); t.height = Math.max(1, Math.round(canvas.height * k));
+  const tx = t.getContext('2d'); tx.imageSmoothingQuality = 'high'; tx.drawImage(canvas, 0, 0, t.width, t.height);
   const tb = await canvasToBlob(t, 'image/jpeg', 0.8);
   if (page.thumbUrl) URL.revokeObjectURL(page.thumbUrl);
   page.thumbUrl = URL.createObjectURL(tb); page.thumbBlob = tb; page._dirty = true;
-  freeCanvas(c); freeCanvas(t);
+  freeCanvas(canvas); freeCanvas(t);
 }
-async function addFiles(files, openAfter){
-  const list = Array.from(files || []).filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|heic|heif|webp)$/i.test(f.name));
-  if (!list.length) return;
-  let last = null, failed = 0;
-  for (let i = 0; i < list.length; i++){
-    await busy(list.length > 1 ? `處理第 ${i+1} / ${list.length} 張…` : '處理中…');
-    try {
-      const src = await blobToCanvas(list[i], MAX_SRC);
-      const page = { id: ++state.seq, srcW: src.width, srcH: src.height, quad: detectQuad(src), filter: $('#defFilter').value, rot: 0, hw: defaultHw(), strokes: [], aiBoxes: [] };
-      page.srcBlob = await canvasToBlob(src, 'image/jpeg', 0.92);
-      await finalize(page, getData(src));
-      freeCanvas(src);
-      state.pages.push(page); last = page;
-    } catch (e){ failed++; console.error(e); }
-  }
-  done(); render();
-  if (failed) toast(`有 ${failed} 張照片讀不到，可能是格式不支援`);
-  if (openAfter && last && list.length === 1) openEditor(last);
-  else if (list.length > 1 && !failed) toast(`已加入 ${list.length} 頁，點縮圖可以調整`);
+// full pipeline from the stored source photo (used after edits and for "re-process all")
+async function reprocess(page, srcImg){
+  if (!srcImg){ const c = await blobToCanvas(page.srcBlob); srcImg = getData(c); freeCanvas(c); }
+  const r = await CV.scan(srcImg, page.quad, OUT_MAX, { filter: page.filter, hw: page.hw });
+  await storeResult(page, finishCanvas(r.out, page));
+}
+let addQueue = Promise.resolve(), queued = 0;
+function addFiles(files){
+  const list = Array.from(files || []).filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|heic|heif|webp)$/i.test(f.name || ''));
+  if (!list.length) return Promise.resolve();
+  queued += list.length;
+  const run = addQueue.then(async () => {
+    let failed = 0, added = 0;
+    for (const f of list){
+      const n = state.pages.length + 1;
+      if (!camOpen()) await busy(queued > 1 ? `處理第 ${n} 頁…（還有 ${queued - 1} 張）` : '處理中…');
+      try {
+        const src = await blobToCanvas(f, MAX_SRC);
+        const page = { id: ++state.seq, srcW: src.width, srcH: src.height, filter: $('#defFilter').value, rot: 0, hw: defaultHw(), strokes: [], aiBoxes: [] };
+        page.srcBlob = await canvasToBlob(src, 'image/jpeg', 0.92);
+        const det = await CV.detect(getData(src)); // detect transfers its buffer, so read again for scan
+        page.quad = det ? det.quad : fullQuad(src.width, src.height, 0.02);
+        page.detScore = det ? det.score : 0;
+        await reprocess(page, getData(src)); freeCanvas(src);
+        state.pages.push(page); added++; render();
+      } catch (e){ failed++; console.error(e); }
+      queued--;
+    }
+    if (!camOpen()) done();
+    if (failed) toast(`有 ${failed} 張照片處理失敗` + (failed === list.length ? '，可能是格式不支援' : ''));
+    else if (added && !camOpen()) toast(added > 1 ? `已加入 ${added} 頁，點縮圖可以調整` : '已加入 1 頁，點縮圖可以調整');
+    return added;
+  });
+  addQueue = run.catch(() => {});
+  return run;
 }
 function render(){
   const n = state.pages.length, g = $('#grid');
@@ -695,15 +529,105 @@ function render(){
   persistSoon();
 }
 
+/* ---------- live camera ---------- */
+const cam = { stream: null, track: null, loop: null, busy: false, last: null, stable: 0, shots: 0, auto: true, cooldown: 0, armed: true, shotQuad: null };
+const camOpen = () => !cam.stream ? false : true;
+const hasCamera = !inClaude && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+async function openCamera(){
+  if (!hasCamera){ $('#camInput').click(); return; }
+  try {
+    cam.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } } });
+  } catch (e){
+    console.warn(e); toast('無法開啟相機，改用系統相機'); $('#camInput').click(); return;
+  }
+  cam.track = cam.stream.getVideoTracks()[0];
+  const v = $('#video'); v.srcObject = cam.stream; try { await v.play(); } catch (e) {}
+  cam.auto = $('#autoShot').value === 'on'; $('#camAuto').classList.toggle('on', cam.auto);
+  cam.shots = 0; cam.last = null; cam.stable = 0; cam.armed = true; cam.shotQuad = null; $('#shotN').classList.add('hidden'); $('#lastshot').innerHTML = '<span class="n hidden" id="shotN">0</span>';
+  $('#cam').classList.remove('hidden'); $('#camStatus').textContent = '尋找紙張中…';
+  CV.init().catch(() => {});
+  cam.loop = setInterval(camTick, 220);
+}
+function closeCamera(){
+  clearInterval(cam.loop); cam.loop = null;
+  if (cam.stream){ cam.stream.getTracks().forEach(t => t.stop()); cam.stream = null; cam.track = null; }
+  $('#video').srcObject = null; $('#cam').classList.add('hidden');
+  const ov = $('#camOverlay'); ov.getContext('2d').clearRect(0, 0, ov.width, ov.height);
+  render();
+}
+const camWork = document.createElement('canvas');
+async function camTick(){
+  if (cam.busy || !cam.stream) return;
+  const v = $('#video'); if (!v.videoWidth) return;
+  cam.busy = true;
+  try {
+    const k = 360 / Math.max(v.videoWidth, v.videoHeight), w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    camWork.width = w; camWork.height = h;
+    const cx = camWork.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, 0, w, h);
+    const det = await CV.detect(cx.getImageData(0, 0, w, h));
+    if (!cam.stream) return;
+    const q = det && det.score > 0.25 ? det.quad.map(p => ({ x: p.x / k, y: p.y / k })) : null;
+    drawCamQuad(q);
+    if (q && cam.last){
+      const move = Math.max(...q.map((p, i) => dist(p, cam.last[i]))) / Math.max(v.videoWidth, v.videoHeight);
+      cam.stable = move < 0.012 ? cam.stable + 1 : 0;
+    } else cam.stable = 0;
+    cam.last = q;
+    const now = Date.now();
+    // after an automatic shot, wait until the paper leaves or clearly moves before arming again (no duplicate shots of one page)
+    if (!cam.armed){
+      const moved = !q || !cam.shotQuad || Math.max(...q.map((p, i) => dist(p, cam.shotQuad[i]))) / Math.max(v.videoWidth, v.videoHeight) > 0.08;
+      if (moved && now >= cam.cooldown) cam.armed = true;
+    }
+    if (!q) $('#camStatus').textContent = '尋找紙張中…';
+    else if (cam.auto){
+      if (!cam.armed) $('#camStatus').textContent = '已拍，換下一張';
+      else if (cam.stable >= 4){ $('#camStatus').textContent = '拍攝！'; cam.shotQuad = q; cam.armed = false; cam.cooldown = now + 1200; await captureFrame(); cam.stable = 0; }
+      else $('#camStatus').textContent = '請拿穩…';
+    } else $('#camStatus').textContent = '已對準，按快門';
+  } catch (e){ console.error(e); }
+  finally { cam.busy = false; }
+}
+function drawCamQuad(q){
+  const v = $('#video'), ov = $('#camOverlay'), r = ov.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  if (ov.width !== Math.round(r.width * dpr) || ov.height !== Math.round(r.height * dpr)){ ov.width = Math.round(r.width * dpr); ov.height = Math.round(r.height * dpr); }
+  const ctx = ov.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, r.width, r.height);
+  if (!q) return;
+  // video is object-fit: contain → compute displayed rect
+  const s = Math.min(r.width / v.videoWidth, r.height / v.videoHeight), dw = v.videoWidth * s, dh = v.videoHeight * s, ox = (r.width - dw) / 2, oy = (r.height - dh) / 2;
+  ctx.beginPath(); q.forEach((p, i) => i ? ctx.lineTo(ox + p.x * s, oy + p.y * s) : ctx.moveTo(ox + p.x * s, oy + p.y * s)); ctx.closePath();
+  ctx.fillStyle = cam.stable >= 4 ? 'rgba(45,212,191,.28)' : 'rgba(45,212,191,.14)'; ctx.fill();
+  ctx.strokeStyle = '#2dd4bf'; ctx.lineWidth = 3; ctx.stroke();
+  for (const p of q){ ctx.beginPath(); ctx.arc(ox + p.x * s, oy + p.y * s, 7, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill(); }
+}
+async function captureFrame(){
+  const v = $('#video'); if (!v.videoWidth) return;
+  const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0);
+  const fl = $('#flash'); fl.style.opacity = .85; setTimeout(() => fl.style.opacity = 0, 120);
+  if (navigator.vibrate) try { navigator.vibrate(30); } catch (e) {}
+  const blob = await canvasToBlob(c, 'image/jpeg', 0.93); freeCanvas(c);
+  cam.shots++;
+  const ls = $('#lastshot'); const url = URL.createObjectURL(blob);
+  ls.innerHTML = `<img src="${url}" alt=""><span class="n" id="shotN">${cam.shots}</span>`;
+  addFiles([new File([blob], `cam_${Date.now()}.jpg`, { type: 'image/jpeg' })]).then(() => { if (cam.stream) $('#camStatus').textContent = `已存第 ${state.pages.length} 頁，繼續拍下一張`; });
+}
+$('#camBtn').addEventListener('click', openCamera);
+$('#shutter').addEventListener('click', () => { captureFrame(); cam.shotQuad = cam.last; cam.armed = false; cam.cooldown = Date.now() + 1200; });
+$('#camAuto').addEventListener('click', () => { cam.auto = !cam.auto; $('#camAuto').classList.toggle('on', cam.auto); $('#autoShot').value = cam.auto ? 'on' : 'off'; toast(cam.auto ? '對準紙張、拿穩就會自動拍' : '改為手動按快門'); });
+$('#camClose').addEventListener('click', closeCamera);
+$('#camDone').addEventListener('click', closeCamera);
+if (!hasCamera){ $('#camBtn').classList.add('hidden'); $('#camLabel').classList.remove('hidden'); }
+
 /* ---------- editor ---------- */
-const ed = { page: null, src: null, srcData: null, draft: null, step: 'crop', scale: 1, drag: null, prevBase: null };
+const ed = { page: null, src: null, srcData: null, draft: null, step: 'crop', scale: 1, drag: null, prevBase: null, eraser: false, busy: false };
 async function openEditor(page){
   await busy('開啟中…');
   try { ed.src = await blobToCanvas(page.srcBlob); }
   catch (e){ done(); toast('無法開啟這一頁'); return; }
-  ed.page = page; ed.srcData = null; ed.prevBase = null;
+  ed.page = page; ed.srcData = null; ed.prevBase = null; ed.eraser = false;
   ed.draft = { quad: page.quad.map(p => ({...p})), filter: page.filter, rot: page.rot, hw: { ...page.hw }, strokes: page.strokes.map(s => ({ r: s.r, pts: s.pts.slice() })), aiBoxes: (page.aiBoxes || []).map(b => ({ ...b })) };
-  ed.eraser = false;
   $('#editor').classList.remove('hidden');
   done(); setStep('crop');
 }
@@ -744,17 +668,12 @@ function drawOverlay(){
   q.forEach((p, i) => { html += `<circle cx="${p.x}" cy="${p.y}" r="${r}" fill="${ed.drag && ed.drag.i === i ? '#2dd4bf' : 'rgba(255,255,255,.25)'}" stroke="#fff" stroke-width="${sw}"/>`; });
   $('#overlay').innerHTML = html;
 }
-function evtToSrc(e){
-  const r = $('#overlay').getBoundingClientRect();
-  return { x: (e.clientX - r.left) / r.width * ed.src.width, y: (e.clientY - r.top) / r.height * ed.src.height };
-}
+function evtToSrc(e){ const r = $('#overlay').getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * ed.src.width, y: (e.clientY - r.top) / r.height * ed.src.height }; }
 function drawLoupe(p){
-  const L = $('#loupe'), ctx = L.getContext('2d'), z = ed.scale * 2.5 * 2; // canvas px per src px (loupe canvas is 2x)
+  const L = $('#loupe'), ctx = L.getContext('2d'), z = ed.scale * 2.5 * 2;
   const box = $('#cropBox'), cx = box.offsetLeft + p.x * ed.scale, cy = box.offsetTop + p.y * ed.scale;
-  const stageW = $('#stage').clientWidth;
-  L.style.left = (cx < 170 && cy < 170) ? (stageW - 132) + 'px' : '12px';
+  L.style.left = (cx < 170 && cy < 170) ? ($('#stage').clientWidth - 132) + 'px' : '12px';
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 240, 240);
-  ctx.imageSmoothingEnabled = true;
   ctx.drawImage(ed.src, p.x - 120 / z, p.y - 120 / z, 240 / z, 240 / z, 0, 0, 240, 240);
   ctx.save(); ctx.translate(120, 120); ctx.scale(z, z); ctx.translate(-p.x, -p.y);
   const q = ed.draft.quad; ctx.beginPath(); q.forEach((pt, i) => i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y)); ctx.closePath();
@@ -781,15 +700,22 @@ const endDrag = () => { if (!ed.drag) return; ed.drag = null; $('#loupe').classL
 ov.addEventListener('pointerup', endDrag); ov.addEventListener('pointercancel', endDrag);
 
 function ensureSrcData(){ if (!ed.srcData) ed.srcData = getData(ed.src); return ed.srcData; }
-function renderPreview(){
+let previewSeq = 0;
+async function renderPreview(){
   if (!ed.src) return;
-  if (!ed.prevBase) ed.prevBase = warp(ensureSrcData(), ed.draft.quad, PREV_MAX);
-  const copy = new ImageData(new Uint8ClampedArray(ed.prevBase.data), ed.prevBase.width, ed.prevBase.height);
-  const c = renderScan(copy, { ...ed.draft, showBoxes: true });
+  const my = ++previewSeq;
+  if (!ed.prevBase){ await busy('校正中…'); ed.prevBase = await CV.warp(cloneImg(ensureSrcData()), ed.draft.quad, PREV_MAX); }
+  else await busy('套用效果…');
+  if (my !== previewSeq || !ed.src) return;
+  let out;
+  try { out = await CV.process(cloneImg(ed.prevBase), { filter: ed.draft.filter, hw: ed.draft.hw }); }
+  catch (e){ console.error(e); done(); toast('處理失敗'); return; }
+  if (my !== previewSeq || !ed.src) return;
+  const c = finishCanvas(out, { ...ed.draft, showBoxes: true });
   const pc = $('#prevCanvas'); pc.width = c.width; pc.height = c.height; pc.getContext('2d').drawImage(c, 0, 0); freeCanvas(c);
   const { w, h } = stageSize(), s = Math.min(w / pc.width, h / pc.height);
   pc.style.width = Math.round(pc.width * s) + 'px'; pc.style.height = Math.round(pc.height * s) + 'px';
-  syncAdjUI();
+  done(); syncAdjUI();
 }
 function syncAdjUI(){
   const dft = ed.draft, hw = dft.hw;
@@ -799,7 +725,7 @@ function syncAdjUI(){
   $('#hwErase').classList.toggle('on', !!ed.eraser);
   $('#pencilRow').classList.toggle('hidden', !hw.pencil || ed.eraser);
   $('#eraseRow').classList.toggle('hidden', !ed.eraser);
-  $('#pencilT').value = Math.round((hw.pencilT || 0.4) * 100);
+  $('#pencilT').value = Math.round((hw.pencilT || 0.45) * 100);
   $('#undoStroke').disabled = !dft.strokes.length;
   $('#hwAI').classList.toggle('hidden', inClaude && !sampleApi);
   $('#aiRow').classList.toggle('hidden', !dft.aiBoxes.length || ed.eraser);
@@ -808,16 +734,12 @@ function syncAdjUI(){
   $('#prevCanvas').style.cursor = ed.eraser ? 'crosshair' : '';
 }
 $('#chips').addEventListener('click', e => { const b = e.target.closest('[data-f]'); if (!b) return; ed.draft.filter = b.dataset.f; renderPreview(); });
-$('#hwColor').addEventListener('click', () => { ed.draft.hw.color = !ed.draft.hw.color; renderPreview(); if (ed.draft.hw.color) toast('已去除藍筆、紅筆等彩色筆跡'); });
-$('#hwPencil').addEventListener('click', () => { ed.draft.hw.pencil = !ed.draft.hw.pencil; if (!ed.draft.hw.pencilT) ed.draft.hw.pencilT = 0.4; renderPreview(); if (ed.draft.hw.pencil) toast('鉛筆字還在的話，把強度往右拉'); });
+$('#hwColor').addEventListener('click', () => { ed.draft.hw.color = !ed.draft.hw.color; renderPreview(); });
+$('#hwPencil').addEventListener('click', () => { ed.draft.hw.pencil = !ed.draft.hw.pencil; if (!ed.draft.hw.pencilT) ed.draft.hw.pencilT = 0.45; renderPreview(); if (ed.draft.hw.pencil) toast('鉛筆字還在的話，把強度往右拉'); });
 $('#hwErase').addEventListener('click', () => { ed.eraser = !ed.eraser; syncAdjUI(); if (ed.eraser) toast('用手指塗掉剩下的字'); });
 let pencilTimer = null;
-$('#pencilT').addEventListener('input', e => {
-  ed.draft.hw.pencilT = e.target.value / 100;
-  clearTimeout(pencilTimer); pencilTimer = setTimeout(renderPreview, 120);
-});
+$('#pencilT').addEventListener('input', e => { ed.draft.hw.pencilT = e.target.value / 100; clearTimeout(pencilTimer); pencilTimer = setTimeout(renderPreview, 250); });
 $('#undoStroke').addEventListener('click', () => { ed.draft.strokes.pop(); renderPreview(); });
-// eraser drawing on the preview (stored in un-rotated, normalised coordinates)
 function dispToPre(u, v, rot){
   if (rot === 1) return { x: v, y: 1 - u };
   if (rot === 2) return { x: 1 - u, y: 1 - v };
@@ -826,10 +748,9 @@ function dispToPre(u, v, rot){
 }
 const pc = $('#prevCanvas'); let curStroke = null, lastDisp = null;
 function pcPoint(e){ const r = pc.getBoundingClientRect(); return { u: (e.clientX - r.left) / r.width, v: (e.clientY - r.top) / r.height }; }
-function brushR(){ return Number($('#brush').value) / 1000; } // fraction of the long side
+function brushR(){ return Number($('#brush').value) / 1000; }
 pc.addEventListener('pointerdown', e => {
   if (!ed.eraser){
-    // tap an AI box to restore that area
     const bx = ed.draft && ed.draft.aiBoxes; if (!bx || !bx.length) return;
     const p = pcPoint(e), q = dispToPre(p.u, p.v, ed.draft.rot);
     const i = bx.findIndex(b => q.x >= b.x0 && q.x <= b.x1 && q.y >= b.y0 && q.y <= b.y1);
@@ -851,7 +772,47 @@ pc.addEventListener('pointermove', e => {
 const endStroke = () => { if (!curStroke) return; ed.draft.strokes.push(curStroke); curStroke = null; $('#undoStroke').disabled = false; };
 pc.addEventListener('pointerup', endStroke); pc.addEventListener('pointercancel', endStroke);
 
-/* ---------- AI 去手寫 (asks Claude where the handwriting is) ---------- */
+$('#tRot').addEventListener('click', () => { ed.draft.rot = (ed.draft.rot + 1) % 4; renderPreview(); });
+$('#tAuto').addEventListener('click', async () => {
+  await busy('偵測中…');
+  try { const det = await CV.detect(cloneImg(ensureSrcData())); ed.draft.quad = det ? det.quad : fullQuad(ed.src.width, ed.src.height, 0.02); drawOverlay(); toast(det ? '已重新偵測' : '找不到紙張邊緣，請手動拖曳'); }
+  catch (e){ toast('偵測失敗'); }
+  done();
+});
+$('#tFull').addEventListener('click', () => { ed.draft.quad = fullQuad(ed.src.width, ed.src.height, 0); drawOverlay(); });
+$('#eBack').addEventListener('click', () => { if (ed.step === 'adjust') setStep('crop'); else closeEditor(); });
+$('#eNext').addEventListener('click', async () => {
+  if (ed.busy) return;
+  if (ed.step === 'crop'){
+    if (!isConvex(ed.draft.quad)){ toast('四個角的位置交叉了，請重新調整'); return; }
+    ed.prevBase = null; setStep('adjust');
+  } else { ed.busy = true; try { await commit(); } finally { ed.busy = false; } closeEditor(); render(); }
+});
+async function commit(){
+  const p = ed.page; if (!p) return;
+  await busy('儲存中…');
+  p.quad = ed.draft.quad.map(x => ({...x})); p.filter = ed.draft.filter; p.rot = ed.draft.rot;
+  p.hw = { ...ed.draft.hw }; p.strokes = ed.draft.strokes.map(s => ({ r: s.r, pts: s.pts.slice() })); p.aiBoxes = ed.draft.aiBoxes.map(b => ({ ...b }));
+  try { await reprocess(p, cloneImg(ensureSrcData())); } catch (e){ console.error(e); toast('處理失敗，請再試一次'); }
+  done();
+}
+let delArmed = null;
+function resetDel(){ clearTimeout(delArmed); delArmed = null; $('#tDel').textContent = '刪除此頁'; }
+$('#tDel').addEventListener('click', () => {
+  if (!delArmed){ $('#tDel').textContent = '再按一次確認'; delArmed = setTimeout(resetDel, 3000); return; }
+  const p = ed.page, i = state.pages.indexOf(p);
+  if (i >= 0) state.pages.splice(i, 1);
+  if (p && p.thumbUrl) URL.revokeObjectURL(p.thumbUrl);
+  closeEditor(); render(); toast('已刪除');
+});
+$('#tSaveImg').addEventListener('click', async () => {
+  if (ed.busy) return; ed.busy = true;
+  try { await commit(); render(); const i = state.pages.indexOf(ed.page) + 1; await saveFile(`${safeName()}_第${i}頁.jpg`, ed.page.outBlob); }
+  finally { ed.busy = false; }
+});
+window.addEventListener('resize', () => { if (ed.src){ ed.step === 'crop' ? layoutCrop() : renderPreview(); } });
+
+/* ---------- AI 去手寫 (Claude only) ---------- */
 const AI_PROMPT = `這張圖是一頁考卷或講義的掃描。我在圖上加了淺藍色的格線和 0–1000 的座標數字，只是用來讓你標位置，不屬於紙本內容。
 
 請找出頁面上「所有手寫的內容」：學生作答（選項字母、數字、文字）、計算過程、草稿、圈選、劃線、打勾打叉、塗改、批改分數、簽名，不論是黑筆、藍筆、紅筆或鉛筆。
@@ -860,7 +821,7 @@ const AI_PROMPT = `這張圖是一頁考卷或講義的掃描。我在圖上加�
 每一處手寫給一個矩形框，座標用 0–1000（左上角是 0,0，x 往右、y 往下）。框要緊貼筆跡、但要把整個筆跡完整包住；距離很近的手寫可以合併成一個框。如果手寫和印刷字重疊，框只框手寫的部分，盡量不要蓋到印刷字。
 
 只回傳 JSON 陣列，例如：[{"x0":120,"y0":340,"x1":180,"y1":372}]。沒有手寫就回傳 []。`;
-let sampleApi = null, aiCtl = null;
+let aiCtl = null;
 function gridOverlay(src){
   const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
   const x = c.getContext('2d'); x.drawImage(src, 0, 0);
@@ -874,14 +835,16 @@ function gridOverlay(src){
   }
   return c;
 }
+function openAiInfo(){
+  $('#shTitle').textContent = 'AI 去手寫';
+  $('#shName').innerHTML = 'AI 去手寫要用 Claude 來判斷（黑筆也能處理），只能在 Claude 裡的版本使用，不另外收費，會用到你的 Claude 使用量。<br><br>這裡的「藍／紅筆」「鉛筆」「橡皮擦」都可以直接用。';
+  $('#shShare').classList.add('hidden'); $('#shDown').textContent = '打開 Claude 版';
+  sheetFile = null; sheetMode = 'ai'; $('#sheet').classList.remove('hidden');
+}
 $('#hwAI').addEventListener('click', async () => {
-  if (!sampleApi){
-    if (!inClaude) openAiInfo(); else toast('這個畫面不能使用 AI');
-    return;
-  }
-  // what the user currently sees (upright), without previous AI boxes
-  const copy = new ImageData(new Uint8ClampedArray(ed.prevBase.data), ed.prevBase.width, ed.prevBase.height);
-  const view = renderScan(copy, { ...ed.draft, aiBoxes: [], showBoxes: false });
+  if (!sampleApi){ if (!inClaude) openAiInfo(); else toast('這個畫面不能使用 AI'); return; }
+  if (!ed.prevBase) return;
+  const view = finishCanvas(await CV.process(cloneImg(ed.prevBase), { filter: ed.draft.filter, hw: ed.draft.hw }), { ...ed.draft, aiBoxes: [], showBoxes: false });
   const k = Math.min(1, 1600 / Math.max(view.width, view.height));
   const small = document.createElement('canvas'); small.width = Math.round(view.width * k); small.height = Math.round(view.height * k);
   small.getContext('2d').drawImage(view, 0, 0, small.width, small.height); freeCanvas(view);
@@ -897,9 +860,9 @@ $('#hwAI').addEventListener('click', async () => {
       let x0 = Number(r.x0), y0 = Number(r.y0), x1 = Number(r.x1), y1 = Number(r.y1);
       if (![x0, y0, x1, y1].every(Number.isFinite)) continue;
       if (x1 < x0) [x0, x1] = [x1, x0]; if (y1 < y0) [y0, y1] = [y1, y0];
-      const pad = 4; // a little margin around the ink (in 0–1000 units)
+      const pad = 4;
       x0 = Math.max(0, x0 - pad) / 1000; y0 = Math.max(0, y0 - pad) / 1000; x1 = Math.min(1000, x1 + pad) / 1000; y1 = Math.min(1000, y1 + pad) / 1000;
-      if ((x1 - x0) * (y1 - y0) > 0.25) continue; // ignore absurd boxes covering a quarter of the page
+      if ((x1 - x0) * (y1 - y0) > 0.25) continue;
       const a = dispToPre(x0, y0, ed.draft.rot), b = dispToPre(x1, y1, ed.draft.rot);
       boxes.push({ x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) });
     }
@@ -909,7 +872,7 @@ $('#hwAI').addEventListener('click', async () => {
     done();
     const c = e && e.code;
     if (c === 'cancelled') return;
-    if (c === 'not_granted' || c === 'sampling_disabled'){ toast('沒有允許這個頁面使用 Claude，AI 去手寫無法使用'); }
+    if (c === 'not_granted' || c === 'sampling_disabled') toast('沒有允許這個頁面使用 Claude，AI 去手寫無法使用');
     else if (c === 'rate_limited') toast('Claude 使用量暫時到上限，晚點再試');
     else if (c === 'invalid_json') toast('AI 回覆的格式有誤，再按一次試試');
     else if (c === 'images_unavailable') toast('這個畫面不能傳圖片給 AI');
@@ -918,47 +881,12 @@ $('#hwAI').addEventListener('click', async () => {
 });
 $('#busyCancel').addEventListener('click', () => { if (aiCtl) aiCtl.abort(); done(); });
 $('#aiClear').addEventListener('click', () => { ed.draft.aiBoxes = []; renderPreview(); toast('已全部還原'); });
-$('#tRot').addEventListener('click', () => { ed.draft.rot = (ed.draft.rot + 1) % 4; renderPreview(); });
-$('#tAuto').addEventListener('click', () => { ed.draft.quad = detectQuad(ed.src); drawOverlay(); toast('已重新偵測'); });
-$('#tFull').addEventListener('click', () => { ed.draft.quad = fullQuad(ed.src.width, ed.src.height, 0); drawOverlay(); });
-$('#eBack').addEventListener('click', () => { if (ed.step === 'adjust') setStep('crop'); else closeEditor(); });
-$('#eNext').addEventListener('click', async () => {
-  if (ed.step === 'crop'){
-    if (!isConvex(ed.draft.quad)){ toast('四個角的位置交叉了，請重新調整'); return; }
-    await busy('校正中…'); ed.prevBase = null; setStep('adjust'); await sleep(20); done();
-  } else { await commit(); closeEditor(); render(); }
-});
-async function commit(){
-  const p = ed.page; if (!p) return;
-  await busy('儲存中…');
-  p.quad = ed.draft.quad.map(x => ({...x})); p.filter = ed.draft.filter; p.rot = ed.draft.rot;
-  p.hw = { ...ed.draft.hw }; p.strokes = ed.draft.strokes.map(s => ({ r: s.r, pts: s.pts.slice() }));
-  p.aiBoxes = ed.draft.aiBoxes.map(b => ({ ...b }));
-  try { await finalize(p, ensureSrcData()); } catch (e){ console.error(e); toast('處理失敗，請再試一次'); }
-  done();
-}
-let delArmed = null;
-function resetDel(){ clearTimeout(delArmed); delArmed = null; $('#tDel').textContent = '刪除此頁'; }
-$('#tDel').addEventListener('click', () => {
-  if (!delArmed){ $('#tDel').textContent = '再按一次確認'; delArmed = setTimeout(resetDel, 3000); return; }
-  const p = ed.page, i = state.pages.indexOf(p);
-  if (i >= 0) state.pages.splice(i, 1);
-  if (p && p.thumbUrl) URL.revokeObjectURL(p.thumbUrl);
-  closeEditor(); render(); toast('已刪除');
-});
-$('#tSaveImg').addEventListener('click', async () => {
-  await commit(); render();
-  const i = state.pages.indexOf(ed.page) + 1;
-  await saveFile(`${safeName()}_第${i}頁.jpg`, ed.page.outBlob);
-});
-window.addEventListener('resize', () => { if (!ed.src) return; ed.step === 'crop' ? layoutCrop() : renderPreview(); });
 
-/* ---------- export ---------- */
-// Standalone (GitHub Pages / home-screen app): share sheet or normal download
+/* ---------- export / save ---------- */
 let sheetFile = null, sheetMode = 'file';
 function openSheet(file){
   sheetFile = file; sheetMode = 'file';
-  $('.sheet .sh-title').textContent = '檔案準備好了'; $('#shDown').textContent = '下載';
+  $('#shTitle').textContent = '檔案準備好了'; $('#shDown').textContent = '下載';
   $('#shName').textContent = `${file.name}（${(file.size / 1024 / 1024).toFixed(1)} MB）`;
   const canShare = !!(navigator.canShare && navigator.canShare({ files: [file] }));
   $('#shShare').classList.toggle('hidden', !canShare);
@@ -992,7 +920,7 @@ async function saveFile(filename, data){
     if (code === 'declined') toast('已取消');
     else if (code === 'rate_limited') toast('請稍等一下再試');
     else if (code === 'too_large') toast('檔案太大，請改用「標準」畫質或分成兩份');
-    else { toast('無法下載：' + (e && e.message || code || '未知錯誤')); }
+    else toast('無法下載：' + (e && e.message || code || '未知錯誤'));
     return false;
   }
 }
@@ -1029,16 +957,16 @@ $('#exportBtn').addEventListener('click', async () => {
 
 /* ---------- settings & inputs ---------- */
 $('#fname').value = defaultName();
-$('#camInput').addEventListener('change', e => { const f = e.target.files; addFiles(f, true).finally(() => { e.target.value = ''; }); });
-$('#libInput').addEventListener('change', e => { const f = e.target.files; addFiles(f, true).finally(() => { e.target.value = ''; }); });
+$('#camInput').addEventListener('change', e => { const f = e.target.files; addFiles(f).finally(() => { e.target.value = ''; }); });
+$('#libInput').addEventListener('change', e => { const f = e.target.files; addFiles(f).finally(() => { e.target.value = ''; }); });
 $('#applyAll').addEventListener('click', async () => {
   const f = $('#defFilter').value; if (!state.pages.length){ toast('還沒有頁面'); return; }
   for (let i = 0; i < state.pages.length; i++){
-    await busy(`套用中… ${i+1} / ${state.pages.length}`);
+    await busy(`重新處理… ${i+1} / ${state.pages.length}`);
     const p = state.pages[i]; p.filter = f; p.hw = defaultHw();
-    try { const c = await blobToCanvas(p.srcBlob); await finalize(p, getData(c)); freeCanvas(c); } catch (e){ console.error(e); }
+    try { await reprocess(p); } catch (e){ console.error(e); }
   }
-  done(); render(); toast('已套用到所有頁面');
+  done(); render(); toast('已重新處理所有頁面');
 });
 let clearArmed = null;
 $('#clearAll').addEventListener('click', () => {
@@ -1047,39 +975,28 @@ $('#clearAll').addEventListener('click', () => {
   clearTimeout(clearArmed); clearArmed = null; b.textContent = '清除全部頁面';
   state.pages.forEach(p => p.thumbUrl && URL.revokeObjectURL(p.thumbUrl)); state.pages = []; render(); toast('已清除');
 });
-// drag & drop on desktop
 document.addEventListener('dragover', e => e.preventDefault());
-document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files, true); });
+document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
 
-function openAiInfo(){
-  $('#shName').innerHTML = 'AI 去手寫要用 Claude 來判斷，只能在 Claude 裡的版本使用（不另外收費，會用到你的 Claude 使用量）。<br><br>這裡的「藍／紅筆」「鉛筆」「橡皮擦」都可以直接用。';
-  $('.sheet .sh-title').textContent = 'AI 去手寫';
-  $('#shShare').classList.add('hidden');
-  $('#shDown').textContent = '打開 Claude 版';
-  sheetFile = null; sheetMode = 'ai'; $('#sheet').classList.remove('hidden');
-}
-
-/* ---------- start-up: restore saved pages, Claude capabilities, offline app ---------- */
+/* ---------- start-up ---------- */
 (async () => {
   await storeOpen(); await restore(); render();
-  if (store.ok) $('#note').textContent = '掃描的頁面會存在這台裝置上，關掉再開還在；不需要時可以在設定裡「清除全部頁面」。照片只在你的裝置上處理，不會上傳。';
+  if (!store.ok) $('#note').textContent = '這個瀏覽器不能保存頁面，重新整理或關閉就會清空，記得先匯出。照片只在你的裝置上處理，不會上傳。';
   if (!inClaude && 'serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  CV.init().catch(e => console.error(e));
 })();
 (async () => {
   if (!inClaude) return;
-  const has = true;
-  try { downloadsApi = has ? await window.claude.use('downloads') : null; }
-  catch (e){ downloadsApi = null; }
+  try { downloadsApi = await window.claude.use('downloads'); } catch (e){ downloadsApi = null; }
   if (!downloadsApi) $('#dlWarn').classList.remove('hidden');
   try {
-    const s = has ? await window.claude.use('sample') : null;
+    const s = await window.claude.use('sample');
     const lim = s ? await s.limits().catch(() => null) : null;
     sampleApi = (s && lim && lim.images) ? s : null;
   } catch (e){ sampleApi = null; }
   if (ed.page && ed.step === 'adjust') syncAdjUI();
 })();
-
-render();
+window.__scanner = { state, ed, CV, cam };
 })();
 </script>
 </body>
