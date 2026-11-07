@@ -1,5 +1,5 @@
 /* 離線快取：整個 app 只有幾個檔案，全部 cache-first；改版時把 VER 加一 */
-const VER = 'v3';
+const VER = 'v4';
 const SHELL = ['./', 'index.html', 'jspdf.umd.min.js', 'opencv.js', 'cvpipe.js', 'cvworker.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open('scan-' + VER).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

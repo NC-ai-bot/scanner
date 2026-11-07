@@ -566,7 +566,7 @@ async function camTick(){
     const cx = camWork.getContext('2d', { willReadFrequently: true }); cx.drawImage(v, 0, 0, w, h);
     const det = await CV.detect(cx.getImageData(0, 0, w, h));
     if (!cam.stream) return;
-    const q = det && det.score > 0.25 ? det.quad.map(p => ({ x: p.x / k, y: p.y / k })) : null;
+    const q = det && det.score > 0.08 ? det.quad.map(p => ({ x: p.x / k, y: p.y / k })) : null;
     drawCamQuad(q);
     if (q && cam.last){
       const move = Math.max(...q.map((p, i) => dist(p, cam.last[i]))) / Math.max(v.videoWidth, v.videoHeight);

@@ -7,7 +7,7 @@
 let cv = null;
 function use(cvModule){ cv = cvModule; }
 
-const DET_SIZE = 520;
+const DET_SIZE = 640;
 
 /* ---------- helpers ---------- */
 function toMat(img){ return cv.matFromImageData(img); }
@@ -69,10 +69,57 @@ function quadsFromMask(mask, imgArea, w, h, found){
   }
   contours.delete(); hier.delete();
 }
-function scoreQuad(q, w, h){
+function edgeSupport(q, edge, w, h){ // fraction of the quad's outline that lies on an image edge (per side, worst side counts most)
+  const o = order(q), sides = [];
+  for (let i = 0; i < 4; i++){
+    const a = o[i], b = o[(i+1)%4], len = dist(a, b), n = Math.max(8, Math.ceil(len / 2));
+    let hit = 0;
+    for (let k = 0; k <= n; k++){
+      const t = k / n, x = Math.round(a.x + (b.x - a.x) * t), y = Math.round(a.y + (b.y - a.y) * t);
+      if (x < 0 || y < 0 || x >= w || y >= h) continue;
+      if (edge[y * w + x]) hit++;
+    }
+    sides.push(hit / (n + 1));
+  }
+  const mean = sides.reduce((p, c) => p + c, 0) / 4, min = Math.min(...sides);
+  return 0.7 * mean + 0.3 * min;
+}
+function pointInQuad(q, x, y){ // q ordered
+  let sign = 0;
+  for (let i = 0; i < 4; i++){ const a = q[i], b = q[(i+1)%4], cr = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x); const s2 = cr > 0 ? 1 : cr < 0 ? -1 : 0; if (!s2) continue; if (!sign) sign = s2; else if (s2 !== sign) return false; }
+  return true;
+}
+function textCoverage(q, pts){ // share of text pixels that fall inside the quad (the paper holds the text)
+  if (!pts || pts.length < 40) return 1;
+  const o = order(q); let inside = 0; const n = pts.length / 2;
+  for (let i = 0; i < pts.length; i += 2) if (pointInQuad(o, pts[i], pts[i+1])) inside++;
+  return inside / n;
+}
+// is the strip just inside the outline as bright as the middle? (paper is uniform; a quad that includes desk is not)
+function bandSimilarity(q, gray, w, h){
+  const o = order(q), cx = o.reduce((p, c) => p + c.x, 0) / 4, cy = o.reduce((p, c) => p + c.y, 0) / 4;
+  const sample = (k) => { // k: 1 = on the outline, 0 = centre
+    let sum = 0, n = 0;
+    for (let i = 0; i < 4; i++){
+      const a = o[i], b = o[(i+1)%4];
+      for (let t = 0.1; t <= 0.9; t += 0.1){
+        const px = a.x + (b.x - a.x) * t, py = a.y + (b.y - a.y) * t;
+        const x = Math.round(cx + (px - cx) * k), y = Math.round(cy + (py - cy) * k);
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+        vals.push(gray[y * w + x]);
+      }
+    }
+  };
+  let vals = []; sample(0.6); if (!vals.length) return 0.5;
+  const innerVals = vals.slice().sort((p, c) => p - c), ref = innerVals[Math.floor(innerVals.length * 0.7)]; // bright-ish paper level, ignoring ink
+  vals = []; sample(0.96); if (!vals.length) return 0.5;
+  let ok = 0; for (const v of vals) if (Math.abs(v - ref) < 45) ok++;
+  return ok / vals.length;
+}
+function scoreQuad(q, w, h, edge, textPts, gray){
   const a = polyArea(q), imgA = w * h;
   if (a < imgA * 0.1 || a > imgA * 0.985) return -1;
-  const ang = angles(q); if (ang.some(x => x < 38 || x > 142)) return -1;
+  const ang = angles(q); if (ang.some(x => x < 50 || x > 130)) return -1;
   // sides ratio sanity (paper is not a sliver)
   const o = order(q), wTop = dist(o[0], o[1]), wBot = dist(o[3], o[2]), hL = dist(o[0], o[3]), hR = dist(o[1], o[2]);
   const ar = Math.max(wTop, wBot) / Math.max(1, Math.max(hL, hR));
@@ -80,11 +127,87 @@ function scoreQuad(q, w, h){
   // penalise quads glued to the image frame on all sides (that is just the frame)
   const m = 3; let touch = 0;
   if (o.some(p => p.x <= m)) touch++; if (o.some(p => p.x >= w-1-m)) touch++; if (o.some(p => p.y <= m)) touch++; if (o.some(p => p.y >= h-1-m)) touch++;
-  let s = a / imgA;
-  if (touch === 4 && a > imgA * 0.93) s *= 0.3;
+  let s = Math.sqrt(Math.min(1, (a / imgA) / 0.25));
+  if (touch === 4 && a > imgA * 0.93) s *= 0.5;
   // prefer right-ish angles
   const angPen = ang.reduce((acc, x) => acc + Math.abs(x - 90), 0) / 4; s *= 1 - Math.min(0.5, angPen / 90);
+  // the outline must actually sit on edges in the image (a shadow or the frame alone does not make a paper)
+  if (edge){ const sup = edgeSupport(q, edge, w, h); s *= 0.25 + 0.75 * sup; }
+  if (textPts){ const cov = textCoverage(q, textPts); s *= 0.1 + 0.9 * Math.pow(cov, 6); }
+  if (gray){ const sim = bandSimilarity(q, gray, w, h); s *= 0.2 + 0.8 * sim; }
   return s;
+}
+/* straight-line candidates: pairs of near-parallel lines in two orientations → quads (white paper on a white desk) */
+function lineAngle(l){ let a = Math.atan2(l.y2 - l.y1, l.x2 - l.x1) * 180 / Math.PI; a = ((a % 180) + 180) % 180; return a; }
+function angDiff(a, b){ let d = Math.abs(a - b) % 180; return Math.min(d, 180 - d); }
+function intersect(l, m){
+  const x1 = l.x1, y1 = l.y1, x2 = l.x2, y2 = l.y2, x3 = m.x1, y3 = m.y1, x4 = m.x2, y4 = m.y2;
+  const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4); if (Math.abs(den) < 1e-6) return null;
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+  return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+}
+function ptLineDist(p, l){ const dx = l.x2 - l.x1, dy = l.y2 - l.y1, L = Math.hypot(dx, dy) || 1; return Math.abs((p.x - l.x1) * dy - (p.y - l.y1) * dx) / L; }
+function extend(m){ // longest extent of all member segments along the line direction
+  const a = m.a * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a), ref = m.segs[0];
+  let tMin = Infinity, tMax = -Infinity;
+  for (const sg of m.segs) for (const p of [[sg.x1, sg.y1], [sg.x2, sg.y2]]){ const t = (p[0] - ref.x1) * dx + (p[1] - ref.y1) * dy; if (t < tMin) tMin = t; if (t > tMax) tMax = t; }
+  return { x1: ref.x1 + dx * tMin, y1: ref.y1 + dy * tMin, x2: ref.x1 + dx * tMax, y2: ref.y1 + dy * tMax, len: m.len, a: m.a, segs: m.segs };
+}
+function mergeLines(lines){
+  // 1) merge near-collinear segments (same angle, same offset)
+  const groups = [];
+  for (const l of lines){
+    const a = lineAngle(l), nx = -Math.sin(a * Math.PI / 180), ny = Math.cos(a * Math.PI / 180), off = nx * l.x1 + ny * l.y1;
+    let m = groups.find(o => angDiff(o.a, a) < 3 && Math.abs(o.off - off) < 6);
+    if (!m){ groups.push({ a, off, segs: [l], len: l.len }); continue; }
+    m.segs.push(l); m.len += l.len;
+  }
+  let out = groups.map(extend).sort((p, q) => q.len - p.len);
+  // 2) chain: a slightly curved paper edge comes out as several short lines at slightly different angles — join them
+  let changed = true;
+  while (changed){
+    changed = false;
+    for (let i = 0; i < out.length && !changed; i++) for (let j = i + 1; j < out.length; j++){
+      const A = out[i], B = out[j];
+      if (angDiff(A.a, B.a) > 6) continue;
+      if (ptLineDist({ x: B.x1, y: B.y1 }, A) > 9 || ptLineDist({ x: B.x2, y: B.y2 }, A) > 9) continue;
+      // refit angle from the two far ends
+      const segs = A.segs.concat(B.segs), len = A.len + B.len;
+      const pts = []; for (const sg of segs){ pts.push({ x: sg.x1, y: sg.y1 }, { x: sg.x2, y: sg.y2 }); }
+      let far = [pts[0], pts[1], 0]; for (let p = 0; p < pts.length; p++) for (let q = p + 1; q < pts.length; q++){ const d = dist(pts[p], pts[q]); if (d > far[2]) far = [pts[p], pts[q], d]; }
+      const a = lineAngle({ x1: far[0].x, y1: far[0].y, x2: far[1].x, y2: far[1].y });
+      out.splice(j, 1); out[i] = extend({ a, segs, len }); out.sort((p, q) => q.len - p.len); changed = true; break;
+    }
+  }
+  return out;
+}
+function quadsFromLines(edges, w, h, found){
+  const lines = new cv.Mat();
+  cv.HoughLinesP(edges, lines, 1, Math.PI / 180, 25, Math.max(w, h) * 0.08, 20);
+  const segs = [], d = lines.data32S, nL = d.length / 4; // opencv.js returns a 1×N matrix
+  for (let i = 0; i < nL; i++){ const x1 = d[i*4], y1 = d[i*4+1], x2 = d[i*4+2], y2 = d[i*4+3]; segs.push({ x1, y1, x2, y2, len: Math.hypot(x2 - x1, y2 - y1) }); }
+  lines.delete();
+  if (segs.length < 4) return;
+  // dominant orientation (length-weighted histogram, 5° bins)
+  const hist = new Float32Array(36); for (const sg of segs) hist[Math.floor(lineAngle(sg) / 5) % 36] += sg.len;
+  let bestBin = 0; for (let i = 0; i < 36; i++){ const v = hist[i] + hist[(i + 18) % 36]; if (v > hist[bestBin] + hist[(bestBin + 18) % 36]) bestBin = i; }
+  const A = bestBin * 5 + 2.5;
+  const g1 = mergeLines(segs.filter(sg => angDiff(lineAngle(sg), A) < 22)).sort((p, q) => q.len - p.len).slice(0, 10);
+  const g2 = mergeLines(segs.filter(sg => angDiff(lineAngle(sg), A + 90) < 22)).sort((p, q) => q.len - p.len).slice(0, 10);
+  if (root.__cvDebugLines) root.__cvDebugLines({ A, g1, g2, n: segs.length });
+  if (g1.length < 2 || g2.length < 2) return;
+  for (let i = 0; i < g1.length; i++) for (let j = i + 1; j < g1.length; j++)
+    for (let k = 0; k < g2.length; k++) for (let l = k + 1; l < g2.length; l++){
+      const p = [intersect(g1[i], g2[k]), intersect(g1[i], g2[l]), intersect(g1[j], g2[l]), intersect(g1[j], g2[k])];
+      if (p.some(x => !x || x.x < -w * 0.05 || x.y < -h * 0.05 || x.x > w * 1.05 || x.y > h * 1.05)) continue;
+      const q = p.map(x => ({ x: Math.min(w - 1, Math.max(0, x.x)), y: Math.min(h - 1, Math.max(0, x.y)) }));
+      if (isConvexQ(q)) found.push(q);
+    }
+}
+function isConvexQ(q){
+  let sign = 0;
+  for (let i = 0; i < 4; i++){ const a = q[i], b = q[(i+1)%4], c = q[(i+2)%4], cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x); if (Math.abs(cr) < 1e-6) return false; const s2 = Math.sign(cr); if (!sign) sign = s2; else if (s2 !== sign) return false; }
+  return true;
 }
 function detectMat(src, W, H){
   const s = Math.min(1, DET_SIZE / Math.max(W, H));
@@ -98,6 +221,29 @@ function detectMat(src, W, H){
   const found = [], imgArea = w * h;
   const k3 = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
   const k5 = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
+  // sensitive edge map used both for line candidates and for scoring (does the outline sit on real edges?)
+  // high-pass + gain makes a white paper edge on a white desk visible
+  const edgeFine = new cv.Mat(), textPts = [];
+  {
+    const bl = new cv.Mat(); cv.GaussianBlur(gray, bl, new cv.Size(0, 0), 12);
+    const g16 = new cv.Mat(), b16 = new cv.Mat(), d16 = new cv.Mat(); gray.convertTo(g16, cv.CV_16S); bl.convertTo(b16, cv.CV_16S); cv.subtract(g16, b16, d16);
+    const boosted = new cv.Mat(); d16.convertTo(boosted, cv.CV_8U, 4, 128); cv.GaussianBlur(boosted, boosted, new cv.Size(3, 3), 0);
+    cv.Canny(boosted, edgeFine, 30, 90);
+    const es = new cv.Mat(); cv.Canny(sat, es, 25, 80); cv.bitwise_or(edgeFine, es, edgeFine);
+    del(bl, g16, b16, d16, boosted, es);
+    // the image border itself is never a paper edge: blank a thin frame so border artefacts cannot vote
+    { const fb = 4, ed = edgeFine.data; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (x < fb || y < fb || x >= w - fb || y >= h - fb) ed[y * w + x] = 0; }
+    // drop small edge blobs (text, noise): paper edges, table rules and shadows are long structures
+    const labels = new cv.Mat(), stats = new cv.Mat(), cent = new cv.Mat();
+    const n = cv.connectedComponentsWithStats(edgeFine, labels, stats, cent, 8, cv.CV_32S);
+    const minLen = Math.max(w, h) * 0.06, keep = new Uint8Array(n);
+    for (let i = 1; i < n; i++){ const bw = stats.data32S[i * 5 + 2], bh = stats.data32S[i * 5 + 3]; if (Math.max(bw, bh) >= minLen) keep[i] = 1; }
+    const ld = labels.data32S, ed = edgeFine.data;
+    for (let i = 0; i < w * h; i++) if (ed[i] && !keep[ld[i]]){ ed[i] = 0; if ((i & 3) === 0) textPts.push(i % w, (i / w) | 0); }
+    del(labels, stats, cent);
+  }
+  const edgeWide = new cv.Mat(); cv.dilate(edgeFine, edgeWide, k5); const edgeArr = new Uint8Array(edgeWide.data);
+  { const e = new cv.Mat(); cv.dilate(edgeFine, e, k3); quadsFromLines(e, w, h, found); quadsFromMask(e, imgArea, w, h, found); e.delete(); }
   for (const [lo, hi] of [[40, 120], [20, 70], [80, 200]]){
     const e = new cv.Mat(); cv.Canny(blur, e, lo, hi); cv.dilate(e, e, k3);
     quadsFromMask(e, imgArea, w, h, found); e.delete();
@@ -118,8 +264,10 @@ function detectMat(src, W, H){
     const e = new cv.Mat(); cv.Canny(sat, e, 30, 90); cv.dilate(e, e, k3); quadsFromMask(e, imgArea, w, h, found); e.delete();
   }
   let best = null, bestS = 0;
-  for (const q of found){ const sc = scoreQuad(q, w, h); if (sc > bestS){ bestS = sc; best = q; } }
-  del(small, rgb, gray, blur, hsv, sat, val, k3, k5); ch.delete();
+  const grayArr = new Uint8Array(blur.data);
+  for (const q of found){ const sc = scoreQuad(q, w, h, edgeArr, textPts, grayArr); if (sc > bestS){ bestS = sc; best = q; } }
+  if (root.__cvDebug) root.__cvDebug(found.map(q => ({ q: order(q).map(p => [Math.round(p.x / s), Math.round(p.y / s)]), s: scoreQuad(q, w, h, edgeArr, textPts, grayArr) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 8));
+  del(small, rgb, gray, blur, hsv, sat, val, k3, k5, edgeFine, edgeWide); ch.delete();
   if (!best) return null;
   return { quad: order(best).map(p => ({ x: (p.x + 0.5) / s, y: (p.y + 0.5) / s })), score: bestS };
 }
