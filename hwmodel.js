@@ -14,8 +14,9 @@ async function load(onStatus){
     root.ort.env.wasm.wasmPaths = './';
     root.ort.env.wasm.numThreads = 1;
     try { root.ort.env.wasm.simd = true; } catch (e) {}
-    const resp = await fetch('hw.bin'); if (!resp.ok) throw new Error('model fetch ' + resp.status);
-    const buf = new Uint8Array(await resp.arrayBuffer());
+    const resp = await fetch('hw.model.json'); if (!resp.ok) throw new Error('model fetch ' + resp.status);
+    const b64 = (await resp.json()).b64, bin = atob(b64), buf = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
     session = await root.ort.InferenceSession.create(buf, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
     return session;
   })();
