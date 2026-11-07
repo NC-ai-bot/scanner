@@ -264,6 +264,7 @@ const OUT_MAX = 2000;   // stored scan resolution
 const PREV_MAX = 1300;  // editor preview resolution
 const FILTERS = [{id:'original',name:'原圖'},{id:'enhance',name:'增強'},{id:'gray',name:'灰階'},{id:'bw',name:'黑白'}];
 const CLAUDE_URL = 'https://claude.ai/artifact/U91zTDhgKzjACF264YRVuK';
+const APP_VER = 'v5';
 
 const state = { pages: [], seq: 0 };
 const inClaude = !!(window.claude && window.claude.use);
@@ -368,7 +369,7 @@ const CV = (() => {
       setEng('影像引擎載入中…');
       try { await initWorker(); }
       catch (e){ console.warn('worker failed, falling back', e); try { await initMain(); } catch (e2){ setEng('影像引擎載入失敗', 'bad'); throw e2; } }
-      setEng('引擎就緒', 'ok'); setTimeout(() => $('#eng').classList.add('hidden'), 2500);
+      setEng('引擎就緒 ' + APP_VER, 'ok'); setTimeout(() => setEng(APP_VER, ''), 2500);
     })();
     return ready;
   }
@@ -775,7 +776,7 @@ pc.addEventListener('pointerup', endStroke); pc.addEventListener('pointercancel'
 $('#tRot').addEventListener('click', () => { ed.draft.rot = (ed.draft.rot + 1) % 4; renderPreview(); });
 $('#tAuto').addEventListener('click', async () => {
   await busy('偵測中…');
-  try { const det = await CV.detect(cloneImg(ensureSrcData())); ed.draft.quad = det ? det.quad : fullQuad(ed.src.width, ed.src.height, 0.02); drawOverlay(); toast(det ? '已重新偵測' : '找不到紙張邊緣，請手動拖曳'); }
+  try { const det = await CV.detect(cloneImg(ensureSrcData())); ed.draft.quad = det ? det.quad : fullQuad(ed.src.width, ed.src.height, 0.02); drawOverlay(); toast(det ? `已重新偵測（${APP_VER}）` : '找不到紙張邊緣，請手動拖曳'); }
   catch (e){ toast('偵測失敗'); }
   done();
 });
@@ -982,7 +983,11 @@ document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer 
 (async () => {
   await storeOpen(); await restore(); render();
   if (!store.ok) $('#note').textContent = '這個瀏覽器不能保存頁面，重新整理或關閉就會清空，記得先匯出。照片只在你的裝置上處理，不會上傳。';
-  if (!inClaude && 'serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (!inClaude && 'serviceWorker' in navigator && location.protocol === 'https:'){
+    const hadController = !!navigator.serviceWorker.controller; let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloading){ reloading = true; toast('已更新到新版，重新載入…'); setTimeout(() => location.reload(), 600); } });
+    navigator.serviceWorker.register('sw.js').then(reg => { reg.update().catch(() => {}); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); }); }).catch(() => {});
+  }
   CV.init().catch(e => console.error(e));
 })();
 (async () => {
