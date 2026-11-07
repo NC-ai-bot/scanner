@@ -86,11 +86,10 @@ function scoreQuad(q, w, h){
   const angPen = ang.reduce((acc, x) => acc + Math.abs(x - 90), 0) / 4; s *= 1 - Math.min(0.5, angPen / 90);
   return s;
 }
-function detect(img){
-  const src = toMat(img), W = img.width, H = img.height;
+function detectMat(src, W, H){
   const s = Math.min(1, DET_SIZE / Math.max(W, H));
   const w = Math.max(32, Math.round(W * s)), h = Math.max(32, Math.round(H * s));
-  const small = new cv.Mat(); cv.resize(src, small, new cv.Size(w, h), 0, 0, cv.INTER_AREA); src.delete();
+  const small = new cv.Mat(); cv.resize(src, small, new cv.Size(w, h), 0, 0, cv.INTER_AREA);
   const rgb = new cv.Mat(); cv.cvtColor(small, rgb, cv.COLOR_RGBA2RGB);
   const gray = new cv.Mat(); cv.cvtColor(rgb, gray, cv.COLOR_RGB2GRAY);
   const blur = new cv.Mat(); cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0);
@@ -99,18 +98,15 @@ function detect(img){
   const found = [], imgArea = w * h;
   const k3 = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
   const k5 = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(5, 5));
-  // 1) Canny on gray, two sensitivities
   for (const [lo, hi] of [[40, 120], [20, 70], [80, 200]]){
     const e = new cv.Mat(); cv.Canny(blur, e, lo, hi); cv.dilate(e, e, k3);
     quadsFromMask(e, imgArea, w, h, found); e.delete();
   }
-  // 2) Otsu on brightness (paper is the bright blob)
   {
     const t = new cv.Mat(); cv.threshold(blur, t, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
     cv.morphologyEx(t, t, cv.MORPH_CLOSE, k5); cv.morphologyEx(t, t, cv.MORPH_OPEN, k5);
     quadsFromMask(t, imgArea, w, h, found); t.delete();
   }
-  // 3) low saturation blob (white paper on a coloured desk)
   {
     const sb = new cv.Mat(); cv.GaussianBlur(sat, sb, new cv.Size(7, 7), 0);
     const t = new cv.Mat(); cv.threshold(sb, t, 0, 255, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
@@ -118,7 +114,6 @@ function detect(img){
     cv.morphologyEx(t, t, cv.MORPH_CLOSE, k5); cv.morphologyEx(t, t, cv.MORPH_OPEN, k5);
     quadsFromMask(t, imgArea, w, h, found); sb.delete(); t.delete(); vb.delete();
   }
-  // 4) Canny on the saturation channel too
   {
     const e = new cv.Mat(); cv.Canny(sat, e, 30, 90); cv.dilate(e, e, k3); quadsFromMask(e, imgArea, w, h, found); e.delete();
   }
@@ -126,11 +121,53 @@ function detect(img){
   for (const q of found){ const sc = scoreQuad(q, w, h); if (sc > bestS){ bestS = sc; best = q; } }
   del(small, rgb, gray, blur, hsv, sat, val, k3, k5); ch.delete();
   if (!best) return null;
-  let o = order(best).map(p => ({ x: (p.x + 0.5) / s, y: (p.y + 0.5) / s }));
-  // pull the corners a hair inward so the desk never shows as a dark rim
+  return { quad: order(best).map(p => ({ x: (p.x + 0.5) / s, y: (p.y + 0.5) / s })), score: bestS };
+}
+// an upright rectangle with square corners and sides parallel to the image: a screenshot frame or a photo in a photo
+function isAxisRect(q, W, H){
+  const o = order(q), tol = Math.max(W, H) * 0.015;
+  const horiz = Math.abs(o[0].y - o[1].y) < tol && Math.abs(o[3].y - o[2].y) < tol;
+  const vert = Math.abs(o[0].x - o[3].x) < tol && Math.abs(o[1].x - o[2].x) < tol;
+  return horiz && vert;
+}
+// is the area just outside the rectangle dark (a phone UI, a black border)?
+function darkFrame(src, q, W, H){
+  const o = order(q), m = Math.round(Math.max(W, H) * 0.03);
+  const x0 = Math.round(Math.min(o[0].x, o[3].x)), x1 = Math.round(Math.max(o[1].x, o[2].x)), y0 = Math.round(Math.min(o[0].y, o[1].y)), y1 = Math.round(Math.max(o[2].y, o[3].y));
+  const strips = [];
+  if (y0 > m) strips.push(new cv.Rect(x0, y0 - m, x1 - x0, m));
+  if (H - y1 > m) strips.push(new cv.Rect(x0, y1, x1 - x0, m));
+  if (x0 > m) strips.push(new cv.Rect(x0 - m, y0, m, y1 - y0));
+  if (W - x1 > m) strips.push(new cv.Rect(x1, y0, m, y1 - y0));
+  if (!strips.length) return false;
+  let sum = 0, n = 0;
+  for (const r of strips){ const roi = src.roi(r); const mean = cv.mean(roi); roi.delete(); sum += (mean[0] + mean[1] + mean[2]) / 3; n++; }
+  return sum / n < 80;
+}
+function detect(img){
+  const W = img.width, H = img.height, src = toMat(img);
+  let res = detectMat(src, W, H);
+  // a perfectly upright rectangle is usually not the paper but a frame around the photo (chat screenshot, photo of a screen):
+  // look inside it for the real paper
+  if (res && isAxisRect(res.quad, W, H) && darkFrame(src, res.quad, W, H)){
+    const o = order(res.quad);
+    const x0 = Math.max(0, Math.round(Math.min(o[0].x, o[3].x)) + 2), y0 = Math.max(0, Math.round(Math.min(o[0].y, o[1].y)) + 2);
+    const x1 = Math.min(W, Math.round(Math.max(o[1].x, o[2].x)) - 2), y1 = Math.min(H, Math.round(Math.max(o[2].y, o[3].y)) - 2);
+    if (x1 - x0 > 64 && y1 - y0 > 64){
+      const roi = src.roi(new cv.Rect(x0, y0, x1 - x0, y1 - y0)), inner = roi.clone(); roi.delete();
+      const r2 = detectMat(inner, x1 - x0, y1 - y0); inner.delete();
+      if (r2 && r2.score > 0.12){
+        const q2 = r2.quad.map(p => ({ x: p.x + x0, y: p.y + y0 }));
+        res = { quad: q2, score: r2.score, frame: res.quad };
+      }
+    }
+  }
+  src.delete();
+  if (!res) return null;
+  let o = res.quad.map(p => ({ x: Math.min(W, Math.max(0, p.x)), y: Math.min(H, Math.max(0, p.y)) }));
   const cx = o.reduce((a, p) => a + p.x, 0) / 4, cy = o.reduce((a, p) => a + p.y, 0) / 4, inset = 0.004;
   o = o.map(p => ({ x: Math.min(W, Math.max(0, p.x + (cx - p.x) * inset)), y: Math.min(H, Math.max(0, p.y + (cy - p.y) * inset)) }));
-  return { quad: o, score: bestS };
+  return { quad: o, score: res.score };
 }
 
 /* ---------- warp ---------- */
