@@ -364,7 +364,8 @@ function normalize(rgb, bg){
 function levels(m, lowP, highP, gamma){ // in-place contrast stretch on 8U (1 or 3 ch) using luminance percentiles
   let g;
   if (m.channels() === 3){ g = new cv.Mat(); cv.cvtColor(m, g, cv.COLOR_RGB2GRAY); } else g = m;
-  const lo = Math.min(90, percentile(g, lowP)), hi = Math.max(lo + 40, percentile(g, highP));
+  // white point: anything lighter than ~82% after normalisation is paper (kills bleed-through and faint shadows)
+  const lo = Math.min(90, percentile(g, lowP)), hi = Math.max(lo + 40, Math.min(210, percentile(g, highP)));
   if (g !== m) g.delete();
   const lut = new cv.Mat(1, 256, cv.CV_8U);
   for (let i = 0; i < 256; i++){ let t = (i - lo) / (hi - lo); t = Math.min(1, Math.max(0, t)); lut.data[i] = Math.round(Math.pow(t, gamma) * 255); }

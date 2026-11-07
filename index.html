@@ -12,6 +12,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <script src="jspdf.umd.min.js"></script>
+<script src="hwmodel.js"></script>
 <style>
   :root{ --accent:#0f766e; --accent-2:#14b8a6; --bg:#f3f4f6; --card:#fff; --ink:#111827; --muted:#6b7280; --line:#e5e7eb; --danger:#dc2626; }
   *{box-sizing:border-box}
@@ -153,8 +154,9 @@
     </div>
     <div class="field"><span>預設去手寫</span>
       <select id="defHw">
-        <option value="color">去藍／紅筆</option>
-        <option value="both">去藍／紅筆＋鉛筆</option>
+        <option value="ai">AI 去手寫（含黑筆）＋藍／紅筆</option>
+        <option value="color">只去藍／紅筆</option>
+        <option value="both">藍／紅筆＋鉛筆</option>
         <option value="none">不去除</option>
       </select>
     </div>
@@ -228,8 +230,9 @@
     <div class="hwrow"><span class="lab">去手寫</span>
       <button class="chip tog" id="hwColor">藍／紅筆</button>
       <button class="chip tog" id="hwPencil">鉛筆</button>
+      <button class="chip tog" id="hwModel">🤖 AI 去手寫</button>
       <button class="chip tog" id="hwErase">✎ 橡皮擦</button>
-      <button class="chip tog ai hidden" id="hwAI">✨ AI 去手寫</button>
+      <button class="chip tog ai hidden" id="hwAI">☁️ 問 Claude</button>
     </div>
     <div class="slrow hidden" id="pencilRow"><span>鉛筆去除強度</span><input type="range" id="pencilT" min="25" max="70" value="45"><span class="hint">太強會吃掉淡的印刷字</span></div>
     <div class="slrow hidden" id="eraseRow"><span>筆刷</span><input type="range" id="brush" min="4" max="40" value="12"><button class="tbtn sm" id="undoStroke">↶ 復原</button></div>
@@ -264,7 +267,7 @@ const OUT_MAX = 2000;   // stored scan resolution
 const PREV_MAX = 1300;  // editor preview resolution
 const FILTERS = [{id:'original',name:'原圖'},{id:'enhance',name:'增強'},{id:'gray',name:'灰階'},{id:'bw',name:'黑白'}];
 const CLAUDE_URL = 'https://claude.ai/artifact/U91zTDhgKzjACF264YRVuK';
-const APP_VER = 'v5';
+const APP_VER = 'v6';
 
 const state = { pages: [], seq: 0 };
 const inClaude = !!(window.claude && window.claude.use);
@@ -307,7 +310,7 @@ function defaultName(){
   const d = new Date(), p = n => String(n).padStart(2, '0');
   return `掃描_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
 }
-function defaultHw(){ const v = $('#defHw').value; return { color: v !== 'none', pencil: v === 'both', pencilT: 0.45 }; }
+function defaultHw(){ const v = $('#defHw').value; return { color: v !== 'none', pencil: v === 'both', pencilT: 0.45, model: v === 'ai' }; }
 function safeName(){ const n = ($('#fname').value || '').trim().replace(/[\\/:*?"<>|]+/g, '_'); return n || defaultName(); }
 function fullQuad(W, H, inset = 0){ const ix = W * inset, iy = H * inset; return [{x:ix,y:iy},{x:W-ix,y:iy},{x:W-ix,y:H-iy},{x:ix,y:H-iy}]; }
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -419,7 +422,7 @@ async function restore(){
     const byId = new Map(recs.map(r => [r.id, r]));
     for (const id of order){
       const r = byId.get(id); if (!r || !r.srcBlob || !r.outBlob) continue;
-      const p = { ...r, strokes: r.strokes || [], aiBoxes: r.aiBoxes || [], hw: r.hw || { color: false, pencil: false, pencilT: 0.45 } };
+      const p = { ...r, strokes: r.strokes || [], aiBoxes: r.aiBoxes || [], hw: r.hw || { color: false, pencil: false, pencilT: 0.45, model: false } };
       p.thumbUrl = URL.createObjectURL(r.thumbBlob || r.outBlob);
       state.pages.push(p); state.seq = Math.max(state.seq, p.id);
     }
@@ -451,6 +454,7 @@ function drawBoxes(ctx, boxes, W, H, show){
 }
 function finishCanvas(img, opts){ // processed image → rotated canvas with eraser strokes and AI boxes
   const c = imgToCanvas(img), cx = c.getContext('2d');
+  if (opts.modelMask){ cx.save(); cx.globalCompositeOperation = 'source-over'; cx.drawImage(opts.modelMask, 0, 0, c.width, c.height); cx.restore(); }
   drawStrokes(cx, opts.strokes, c.width, c.height);
   drawBoxes(cx, opts.aiBoxes, c.width, c.height, opts.showBoxes);
   const rot = opts.rot || 0; if (!rot) return c;
@@ -476,7 +480,13 @@ async function storeResult(page, canvas){
 async function reprocess(page, srcImg){
   if (!srcImg){ const c = await blobToCanvas(page.srcBlob); srcImg = getData(c); freeCanvas(c); }
   const r = await CV.scan(srcImg, page.quad, OUT_MAX, { filter: page.filter, hw: page.hw });
-  await storeResult(page, finishCanvas(r.out, page));
+  let modelMask = null;
+  if (page.hw && page.hw.model){
+    try { const mr = await HWModel.handwritingMask(r.out, t => { if (!camOpen()) $('#busyText').textContent = t; }); modelMask = mr.canvas; }
+    catch (e){ console.error(e); toast('AI 模型無法載入，這一頁先不去手寫'); }
+  }
+  await storeResult(page, finishCanvas(r.out, { ...page, modelMask }));
+  if (modelMask) modelMask.width = 0;
 }
 let addQueue = Promise.resolve(), queued = 0;
 function addFiles(files){
@@ -627,7 +637,7 @@ async function openEditor(page){
   await busy('開啟中…');
   try { ed.src = await blobToCanvas(page.srcBlob); }
   catch (e){ done(); toast('無法開啟這一頁'); return; }
-  ed.page = page; ed.srcData = null; ed.prevBase = null; ed.eraser = false;
+  ed.page = page; ed.srcData = null; ed.prevBase = null; ed.eraser = false; ed.maskCache = null;
   ed.draft = { quad: page.quad.map(p => ({...p})), filter: page.filter, rot: page.rot, hw: { ...page.hw }, strokes: page.strokes.map(s => ({ r: s.r, pts: s.pts.slice() })), aiBoxes: (page.aiBoxes || []).map(b => ({ ...b })) };
   $('#editor').classList.remove('hidden');
   done(); setStep('crop');
@@ -712,7 +722,20 @@ async function renderPreview(){
   try { out = await CV.process(cloneImg(ed.prevBase), { filter: ed.draft.filter, hw: ed.draft.hw }); }
   catch (e){ console.error(e); done(); toast('處理失敗'); return; }
   if (my !== previewSeq || !ed.src) return;
-  const c = finishCanvas(out, { ...ed.draft, showBoxes: true });
+  let modelMask = null;
+  if (ed.draft.hw.model){
+    const sig = [ed.draft.filter, !!ed.draft.hw.color, !!ed.draft.hw.pencil, ed.draft.hw.pencilT, ed.prevBase.width].join('|');
+    if (ed.maskCache && ed.maskCache.sig === sig) modelMask = ed.maskCache.canvas;
+    else {
+      try {
+        const r = await HWModel.handwritingMask(out, t => { $('#busyText').textContent = t; });
+        if (my !== previewSeq || !ed.src) return;
+        if (ed.maskCache && ed.maskCache.canvas) ed.maskCache.canvas.width = 0;
+        ed.maskCache = { sig, canvas: r.canvas }; modelMask = r.canvas;
+      } catch (e){ console.error(e); toast('AI 模型無法載入'); ed.draft.hw.model = false; }
+    }
+  }
+  const c = finishCanvas(out, { ...ed.draft, showBoxes: true, modelMask });
   const pc = $('#prevCanvas'); pc.width = c.width; pc.height = c.height; pc.getContext('2d').drawImage(c, 0, 0); freeCanvas(c);
   const { w, h } = stageSize(), s = Math.min(w / pc.width, h / pc.height);
   pc.style.width = Math.round(pc.width * s) + 'px'; pc.style.height = Math.round(pc.height * s) + 'px';
@@ -723,6 +746,7 @@ function syncAdjUI(){
   $('#chips').innerHTML = FILTERS.map(f => `<button class="chip ${f.id === dft.filter ? 'on' : ''}" data-f="${f.id}">${f.name}</button>`).join('');
   $('#hwColor').classList.toggle('on', !!hw.color);
   $('#hwPencil').classList.toggle('on', !!hw.pencil);
+  $('#hwModel').classList.toggle('on', !!hw.model);
   $('#hwErase').classList.toggle('on', !!ed.eraser);
   $('#pencilRow').classList.toggle('hidden', !hw.pencil || ed.eraser);
   $('#eraseRow').classList.toggle('hidden', !ed.eraser);
@@ -738,6 +762,7 @@ $('#chips').addEventListener('click', e => { const b = e.target.closest('[data-f
 $('#hwColor').addEventListener('click', () => { ed.draft.hw.color = !ed.draft.hw.color; renderPreview(); });
 $('#hwPencil').addEventListener('click', () => { ed.draft.hw.pencil = !ed.draft.hw.pencil; if (!ed.draft.hw.pencilT) ed.draft.hw.pencilT = 0.45; renderPreview(); if (ed.draft.hw.pencil) toast('鉛筆字還在的話，把強度往右拉'); });
 $('#hwErase').addEventListener('click', () => { ed.eraser = !ed.eraser; syncAdjUI(); if (ed.eraser) toast('用手指塗掉剩下的字'); });
+$('#hwModel').addEventListener('click', () => { ed.draft.hw.model = !ed.draft.hw.model; renderPreview(); if (ed.draft.hw.model) toast('AI 會把黑筆、藍筆、鉛筆的手寫都擦掉；誤擦的可以關掉或用「問 Claude」'); });
 let pencilTimer = null;
 $('#pencilT').addEventListener('input', e => { ed.draft.hw.pencilT = e.target.value / 100; clearTimeout(pencilTimer); pencilTimer = setTimeout(renderPreview, 250); });
 $('#undoStroke').addEventListener('click', () => { ed.draft.strokes.pop(); renderPreview(); });
@@ -786,7 +811,7 @@ $('#eNext').addEventListener('click', async () => {
   if (ed.busy) return;
   if (ed.step === 'crop'){
     if (!isConvex(ed.draft.quad)){ toast('四個角的位置交叉了，請重新調整'); return; }
-    ed.prevBase = null; setStep('adjust');
+    ed.prevBase = null; ed.maskCache = null; setStep('adjust');
   } else { ed.busy = true; try { await commit(); } finally { ed.busy = false; } closeEditor(); render(); }
 });
 async function commit(){
@@ -958,6 +983,14 @@ $('#exportBtn').addEventListener('click', async () => {
 
 /* ---------- settings & inputs ---------- */
 $('#fname').value = defaultName();
+// remember settings on this device
+try {
+  const saved = JSON.parse(localStorage.getItem('scan-settings') || '{}');
+  for (const id of ['defFilter', 'defHw', 'autoShot', 'pageSize', 'quality']) if (saved[id] != null && $('#' + id).querySelector(`option[value="${saved[id]}"]`)) $('#' + id).value = saved[id];
+} catch (e) {}
+for (const id of ['defFilter', 'defHw', 'autoShot', 'pageSize', 'quality']) $('#' + id).addEventListener('change', () => {
+  try { const o = {}; for (const k of ['defFilter', 'defHw', 'autoShot', 'pageSize', 'quality']) o[k] = $('#' + k).value; localStorage.setItem('scan-settings', JSON.stringify(o)); } catch (e) {}
+});
 $('#camInput').addEventListener('change', e => { const f = e.target.files; addFiles(f).finally(() => { e.target.value = ''; }); });
 $('#libInput').addEventListener('change', e => { const f = e.target.files; addFiles(f).finally(() => { e.target.value = ''; }); });
 $('#applyAll').addEventListener('click', async () => {

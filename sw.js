@@ -1,6 +1,6 @@
 /* 離線快取：整個 app 只有幾個檔案，全部 cache-first；改版時把 VER 加一 */
-const VER = 'v5';
-const SHELL = ['./', 'index.html', 'jspdf.umd.min.js', 'opencv.js', 'cvpipe.js', 'cvworker.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
+const VER = 'v6';
+const SHELL = ['./', 'index.html', 'jspdf.umd.min.js', 'opencv.js', 'cvpipe.js', 'cvworker.js', 'hwmodel.js', 'hw.onnx', 'ort.wasm.min.js', 'ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open('scan-' + VER).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });

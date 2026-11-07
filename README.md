@@ -11,3 +11,8 @@
 改版時記得把 `sw.js` 的 `VER` 加一，手機才會拿到新版。
 
 測試：`test/` 不在 repo 裡；用 Playwright + 假相機 y4m 跑過拍照、處理、匯出流程。
+
+## AI 去手寫（本機模型）
+- `hw.onnx`：小型 U-Net（約 22 萬參數），輸入 RGB、頁寬縮到 1000px，輸出手寫機率；用 onnxruntime-web（`ort.wasm.min.js` + wasm）在手機上跑，每頁約數秒。
+- 訓練資料：`/home/claude/ml/synth.py` 合成的考卷（Noto 印刷字＋手寫字型＋圈選、打叉、塗改），加上 5 張藍筆作答的真實照片（用色度自動標記）。
+- 訓練：`ml/train.py`，匯出：`ml/export.py`。
