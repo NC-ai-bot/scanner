@@ -298,6 +298,26 @@ function detectMat(src, W, H){
   if (root.__cvDebug) root.__cvDebug(found.map(q => ({ q: order(q).map(p => [Math.round(p.x / s), Math.round(p.y / s)]), s: scoreQuad(q, w, h, edgeArr, textPts, grayArr) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 8));
   del(small, rgb, gray, blur, hsv, sat, val, k3, k5, edgeFine, edgeWide); ch.delete();
   if (!best) return null;
+  // A side that does not sit on a real edge and has print beyond it is not the paper's edge (a long pen stroke, a fold,
+  // a shadow): the paper runs out of the picture there, so let that side be the picture border.
+  {
+    const sideSup = (a, b) => { const n = Math.max(8, Math.ceil(dist(a, b) / 2)); let hit = 0; for (let k = 0; k <= n; k++){ const t = k / n, x = Math.round(a.x + (b.x - a.x) * t), y = Math.round(a.y + (b.y - a.y) * t); if (x >= 0 && y >= 0 && x < w && y < h && edgeArr[y * w + x]) hit++; } return hit / (n + 1); };
+    const L = (a, b) => ({ x1: a.x, y1: a.y, x2: b.x, y2: b.y });
+    const borderLines = [L({x:0,y:0},{x:w-1,y:0}), L({x:w-1,y:0},{x:w-1,y:h-1}), L({x:w-1,y:h-1},{x:0,y:h-1}), L({x:0,y:h-1},{x:0,y:0})]; // top right bottom left, like the sides of an ordered quad
+    let cur = order(best), curCov = textCoverage(cur, textPts), curBand = bandSimilarity(cur, grayArr, w, h);
+    for (let pass = 0; pass < 2; pass++) for (let i = 0; i < 4; i++){
+      const a = cur[i], b = cur[(i+1)%4]; if (onBorder(a, b, w, h) || sideSup(a, b) >= 0.5) continue;
+      const prev = L(cur[(i+3)%4], a), next = L(b, cur[(i+2)%4]);
+      const na = intersect(prev, borderLines[i]), nb = intersect(next, borderLines[i]); if (!na || !nb) continue;
+      const clampP = p => ({ x: Math.min(w - 1, Math.max(0, p.x)), y: Math.min(h - 1, Math.max(0, p.y)) });
+      const cand = cur.slice(); cand[i] = clampP(na); cand[(i+1)%4] = clampP(nb);
+      if (!isConvexQ(cand)) continue;
+      const cov = textCoverage(cand, textPts), band = bandSimilarity(cand, grayArr, w, h);
+      if (root.__cvDebugRelax) root.__cvDebugRelax({ i, sup: sideSup(a, b), cov, curCov, band, curBand });
+      if (cov - curCov > 0.012 && band >= curBand - 0.02){ cur = cand; curCov = cov; curBand = band; }
+    }
+    best = cur;
+  }
   // how sure are we? (used to decide whether to show the corner editor)
   const ob = order(best), sup = edgeSupport(best, edgeArr, w, h), cov = textCoverage(best, textPts), band = bandSimilarity(best, grayArr, w, h);
   let borders = 0; for (let i = 0; i < 4; i++) if (onBorder(ob[i], ob[(i+1)%4], w, h)) borders++;
