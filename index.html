@@ -39,6 +39,7 @@
   .card{background:var(--card);border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);position:relative}
   .card .thumb{display:block;width:100%;aspect-ratio:3/4;background:#e5e7eb;padding:0}
   .card .thumb img{width:100%;height:100%;object-fit:contain;display:block}
+  .card .badge{position:absolute;left:6px;top:6px;background:#fbbf24;color:#422006;font-size:11px;font-weight:600;padding:3px 7px;border-radius:999px;pointer-events:none}
   .card.working .thumb::after{content:"處理中…";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.6);font-size:13px;color:var(--muted)}
   .cbar{display:flex;align-items:center;justify-content:space-between;padding:4px 6px;font-size:13px;color:var(--muted)}
   .cbar button{width:34px;height:30px;border-radius:8px;font-size:20px;line-height:1}
@@ -262,12 +263,12 @@
 (() => {
 'use strict';
 const $ = s => document.querySelector(s);
-const MAX_SRC = 2400;   // working copy of the photo
-const OUT_MAX = 2000;   // stored scan resolution
+const MAX_SRC = 3000;   // working copy of the photo
+const OUT_MAX = 2400;   // stored scan resolution
 const PREV_MAX = 1300;  // editor preview resolution
 const FILTERS = [{id:'original',name:'原圖'},{id:'enhance',name:'增強'},{id:'gray',name:'灰階'},{id:'bw',name:'黑白'}];
 const CLAUDE_URL = 'https://claude.ai/artifact/U91zTDhgKzjACF264YRVuK';
-const APP_VER = 'v8';
+const APP_VER = 'v9';
 
 const state = { pages: [], seq: 0 };
 const inClaude = !!(window.claude && window.claude.use);
@@ -396,7 +397,7 @@ async function storeOpen(){
     store.db = await idbReq(r); store.ok = true;
   } catch (e){ store.ok = false; }
 }
-const PAGE_KEYS = ['id','srcW','srcH','outW','outH','quad','filter','rot','hw','strokes','aiBoxes','srcBlob','outBlob','thumbBlob'];
+const PAGE_KEYS = ['id','srcW','srcH','outW','outH','quad','filter','rot','hw','strokes','aiBoxes','srcBlob','outBlob','thumbBlob','uncertain'];
 function persistSoon(){ if (!store.ok) return; clearTimeout(store.timer); store.timer = setTimeout(persistNow, 400); }
 async function persistNow(){
   if (!store.ok) return;
@@ -482,7 +483,7 @@ async function reprocess(page, srcImg){
   const r = await CV.scan(srcImg, page.quad, OUT_MAX, { filter: page.filter, hw: page.hw });
   let modelMask = null;
   if (page.hw && page.hw.model){
-    try { const mr = await HWModel.handwritingMask(r.out, t => { if (!camOpen()) $('#busyText').textContent = t; }); modelMask = mr.canvas; }
+    try { const mr = await HWModel.handwritingMask(r.warped, t => { if (!camOpen()) $('#busyText').textContent = t; }, r.out); modelMask = mr.canvas; }
     catch (e){ console.error(e); toast('AI 模型無法載入，這一頁先不去手寫'); }
   }
   await storeResult(page, finishCanvas(r.out, { ...page, modelMask }));
@@ -504,7 +505,7 @@ function addFiles(files){
         page.srcBlob = await canvasToBlob(src, 'image/jpeg', 0.92);
         const det = await CV.detect(getData(src)); // detect transfers its buffer, so read again for scan
         page.quad = det ? det.quad : fullQuad(src.width, src.height, 0.02);
-        page.detScore = det ? det.score : 0;
+        page.detScore = det ? det.score : 0; page.uncertain = !det || !det.certain;
         await reprocess(page, getData(src)); freeCanvas(src);
         state.pages.push(page); added++; render();
       } catch (e){ failed++; console.error(e); }
@@ -512,7 +513,14 @@ function addFiles(files){
     }
     if (!camOpen()) done();
     if (failed) toast(`有 ${failed} 張照片處理失敗` + (failed === list.length ? '，可能是格式不支援' : ''));
-    else if (added && !camOpen()) toast(added > 1 ? `已加入 ${added} 頁，點縮圖可以調整` : '已加入 1 頁，點縮圖可以調整');
+    else if (added === 1 && !camOpen() && state.pages[state.pages.length - 1].uncertain){
+      // not sure about the paper outline: let the person check the corners right away
+      toast('不太確定紙張邊緣在哪，請確認四個角', 3500); openEditor(state.pages[state.pages.length - 1]);
+    }
+    else if (added && !camOpen()){
+      const unsure = state.pages.slice(-added).filter(p => p.uncertain).length;
+      toast(unsure ? `已加入 ${added} 頁，有 ${unsure} 頁的邊框不太確定（縮圖上有 ⚠），點進去確認` : (added > 1 ? `已加入 ${added} 頁，點縮圖可以調整` : '已加入 1 頁，點縮圖可以調整'), 4000);
+    }
     return added;
   });
   addQueue = run.catch(() => {});
@@ -526,7 +534,7 @@ function render(){
   g.innerHTML = '';
   state.pages.forEach((p, i) => {
     const card = document.createElement('div'); card.className = 'card';
-    card.innerHTML = `<button class="thumb" data-act="edit"><img alt="第 ${i+1} 頁" src="${p.thumbUrl}"></button>
+    card.innerHTML = `<button class="thumb" data-act="edit"><img alt="第 ${i+1} 頁" src="${p.thumbUrl}">${p.uncertain ? '<span class="badge">⚠ 確認邊框</span>' : ''}</button>
       <div class="cbar"><button data-act="left" ${i === 0 ? 'disabled' : ''} aria-label="往前">‹</button><span>第 ${i+1} 頁</span><button data-act="right" ${i === n-1 ? 'disabled' : ''} aria-label="往後">›</button></div>`;
     card.addEventListener('click', e => {
       const btn = e.target.closest('[data-act]'); if (!btn || btn.disabled) return;
@@ -728,7 +736,7 @@ async function renderPreview(){
     if (ed.maskCache && ed.maskCache.sig === sig) modelMask = ed.maskCache.canvas;
     else {
       try {
-        const r = await HWModel.handwritingMask(out, t => { $('#busyText').textContent = t; });
+        const r = await HWModel.handwritingMask(cloneImg(ed.prevBase), t => { $('#busyText').textContent = t; }, out);
         if (my !== previewSeq || !ed.src) return;
         if (ed.maskCache && ed.maskCache.canvas) ed.maskCache.canvas.width = 0;
         ed.maskCache = { sig, canvas: r.canvas }; modelMask = r.canvas;
@@ -817,7 +825,7 @@ $('#eNext').addEventListener('click', async () => {
 async function commit(){
   const p = ed.page; if (!p) return;
   await busy('儲存中…');
-  p.quad = ed.draft.quad.map(x => ({...x})); p.filter = ed.draft.filter; p.rot = ed.draft.rot;
+  p.quad = ed.draft.quad.map(x => ({...x})); p.filter = ed.draft.filter; p.rot = ed.draft.rot; p.uncertain = false;
   p.hw = { ...ed.draft.hw }; p.strokes = ed.draft.strokes.map(s => ({ r: s.r, pts: s.pts.slice() })); p.aiBoxes = ed.draft.aiBoxes.map(b => ({ ...b }));
   try { await reprocess(p, cloneImg(ensureSrcData())); } catch (e){ console.error(e); toast('處理失敗，請再試一次'); }
   done();
@@ -952,8 +960,8 @@ async function saveFile(filename, data){
 }
 async function pageJpegBytes(p, quality){
   if (quality === 'high') return new Uint8Array(await p.outBlob.arrayBuffer());
-  const c = await blobToCanvas(p.outBlob, 1700);
-  const b = await canvasToBlob(c, 'image/jpeg', 0.8); freeCanvas(c);
+  const c = await blobToCanvas(p.outBlob, 2000);
+  const b = await canvasToBlob(c, 'image/jpeg', 0.85); freeCanvas(c);
   return new Uint8Array(await b.arrayBuffer());
 }
 $('#exportBtn').addEventListener('click', async () => {
@@ -1034,7 +1042,7 @@ document.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer 
   } catch (e){ sampleApi = null; }
   if (ed.page && ed.step === 'adjust') syncAdjUI();
 })();
-window.__scanner = { state, ed, CV, cam };
+window.__scanner = { state, ed, CV, cam, reprocess, render };
 })();
 </script>
 </body>

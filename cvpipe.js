@@ -69,10 +69,15 @@ function quadsFromMask(mask, imgArea, w, h, found){
   }
   contours.delete(); hier.delete();
 }
+function onBorder(a, b, w, h){ // both ends of a side on the same picture border: the paper runs out of the picture there
+  const m = Math.max(w, h) * 0.02;
+  return (a.x < m && b.x < m) || (a.y < m && b.y < m) || (a.x > w - 1 - m && b.x > w - 1 - m) || (a.y > h - 1 - m && b.y > h - 1 - m);
+}
 function edgeSupport(q, edge, w, h){ // fraction of the quad's outline that lies on an image edge (per side, worst side counts most)
   const o = order(q), sides = [];
   for (let i = 0; i < 4; i++){
     const a = o[i], b = o[(i+1)%4], len = dist(a, b), n = Math.max(8, Math.ceil(len / 2));
+    if (onBorder(a, b, w, h)) continue; // unknown, not zero
     let hit = 0;
     for (let k = 0; k <= n; k++){
       const t = k / n, x = Math.round(a.x + (b.x - a.x) * t), y = Math.round(a.y + (b.y - a.y) * t);
@@ -81,8 +86,10 @@ function edgeSupport(q, edge, w, h){ // fraction of the quad's outline that lies
     }
     sides.push(hit / (n + 1));
   }
-  const mean = sides.reduce((p, c) => p + c, 0) / 4, min = Math.min(...sides);
-  return 0.7 * mean + 0.3 * min;
+  if (!sides.length) return 0.2;
+  if (root.__cvDebugSides) root.__cvDebugSides(sides);
+  const mean = sides.reduce((p, c) => p + c, 0) / sides.length, min = Math.min(...sides);
+  return (0.7 * mean + 0.3 * min) * Math.pow(0.78, 4 - sides.length); // each side that runs out of the picture costs some certainty
 }
 function pointInQuad(q, x, y){ // q ordered
   let sign = 0;
@@ -102,7 +109,7 @@ function bandSimilarity(q, gray, w, h){
     let sum = 0, n = 0;
     for (let i = 0; i < 4; i++){
       const a = o[i], b = o[(i+1)%4];
-      for (let t = 0.1; t <= 0.9; t += 0.1){
+      for (let t = 0.06; t <= 0.95; t += 0.06){
         const px = a.x + (b.x - a.x) * t, py = a.y + (b.y - a.y) * t;
         const x = Math.round(cx + (px - cx) * k), y = Math.round(cy + (py - cy) * k);
         if (x < 0 || y < 0 || x >= w || y >= h) continue;
@@ -134,7 +141,7 @@ function scoreQuad(q, w, h, edge, textPts, gray){
   // the outline must actually sit on edges in the image (a shadow or the frame alone does not make a paper)
   if (edge){ const sup = edgeSupport(q, edge, w, h); s *= 0.25 + 0.75 * sup; }
   if (textPts){ const cov = textCoverage(q, textPts); s *= 0.1 + 0.9 * Math.pow(cov, 6); }
-  if (gray){ const sim = bandSimilarity(q, gray, w, h); s *= 0.2 + 0.8 * sim; }
+  if (gray){ const sim = bandSimilarity(q, gray, w, h); s *= 0.1 + 0.9 * sim * sim; }
   return s;
 }
 /* straight-line candidates: pairs of near-parallel lines in two orientations → quads (white paper on a white desk) */
@@ -192,8 +199,30 @@ function quadsFromLines(edges, w, h, found){
   const hist = new Float32Array(36); for (const sg of segs) hist[Math.floor(lineAngle(sg) / 5) % 36] += sg.len;
   let bestBin = 0; for (let i = 0; i < 36; i++){ const v = hist[i] + hist[(i + 18) % 36]; if (v > hist[bestBin] + hist[(bestBin + 18) % 36]) bestBin = i; }
   const A = bestBin * 5 + 2.5;
-  const g1 = mergeLines(segs.filter(sg => angDiff(lineAngle(sg), A) < 22)).sort((p, q) => q.len - p.len).slice(0, 10);
-  const g2 = mergeLines(segs.filter(sg => angDiff(lineAngle(sg), A + 90) < 22)).sort((p, q) => q.len - p.len).slice(0, 10);
+  // keep the longest lines, plus the outermost ones in each direction: a paper edge is often shorter than table rules
+  // and text lines inside it, but it is always the outermost line
+  function pick(group, ang){
+    const all = mergeLines(group).filter(l => Math.hypot(l.x2 - l.x1, l.y2 - l.y1) > Math.max(w, h) * 0.12);
+    const nx = -Math.sin(ang * Math.PI / 180), ny = Math.cos(ang * Math.PI / 180);
+    for (const l of all) l.off = nx * (l.x1 + l.x2) / 2 + ny * (l.y1 + l.y2) / 2;
+    const byLen = all.slice().sort((p, q) => q.len - p.len), byOff = all.slice().sort((p, q) => p.off - q.off);
+    const set = new Set(byLen.slice(0, 8));
+    for (const l of byOff.slice(0, 3)) set.add(l);
+    for (const l of byOff.slice(-3)) set.add(l);
+    return Array.from(set);
+  }
+  const g1 = pick(segs.filter(sg => angDiff(lineAngle(sg), A) < 22), A);
+  const g2 = pick(segs.filter(sg => angDiff(lineAngle(sg), A + 90) < 22), A + 90);
+  // the paper may run past the picture: offer the picture's own borders as possible sides
+  // (only where no real line was found near that border: a paper edge close to the border beats the border)
+  const midY = l => (l.y1 + l.y2) / 2, midX = l => (l.x1 + l.x2) / 2;
+  const horiz = angDiff(A, 0) < 30 ? g1 : angDiff(A, 90) < 30 ? g2 : null, vert = horiz === g1 ? g2 : horiz === g2 ? g1 : null;
+  if (horiz && vert){
+    if (!horiz.some(l => midY(l) < h * 0.12)) horiz.push({ x1: 0, y1: 1, x2: w - 1, y2: 1, len: w });
+    if (!horiz.some(l => midY(l) > h * 0.88)) horiz.push({ x1: 0, y1: h - 2, x2: w - 1, y2: h - 2, len: w });
+    if (!vert.some(l => midX(l) < w * 0.12)) vert.push({ x1: 1, y1: 0, x2: 1, y2: h - 1, len: h });
+    if (!vert.some(l => midX(l) > w * 0.88)) vert.push({ x1: w - 2, y1: 0, x2: w - 2, y2: h - 1, len: h });
+  }
   if (root.__cvDebugLines) root.__cvDebugLines({ A, g1, g2, n: segs.length });
   if (g1.length < 2 || g2.length < 2) return;
   for (let i = 0; i < g1.length; i++) for (let j = i + 1; j < g1.length; j++)
@@ -269,7 +298,11 @@ function detectMat(src, W, H){
   if (root.__cvDebug) root.__cvDebug(found.map(q => ({ q: order(q).map(p => [Math.round(p.x / s), Math.round(p.y / s)]), s: scoreQuad(q, w, h, edgeArr, textPts, grayArr) })).filter(x => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 8));
   del(small, rgb, gray, blur, hsv, sat, val, k3, k5, edgeFine, edgeWide); ch.delete();
   if (!best) return null;
-  return { quad: order(best).map(p => ({ x: (p.x + 0.5) / s, y: (p.y + 0.5) / s })), score: bestS };
+  // how sure are we? (used to decide whether to show the corner editor)
+  const ob = order(best), sup = edgeSupport(best, edgeArr, w, h), cov = textCoverage(best, textPts), band = bandSimilarity(best, grayArr, w, h);
+  let borders = 0; for (let i = 0; i < 4; i++) if (onBorder(ob[i], ob[(i+1)%4], w, h)) borders++;
+  const certain = !(sup < 0.3 || band < 0.7 || borders >= 2 || cov < 0.85);
+  return { quad: ob.map(p => ({ x: (p.x + 0.5) / s, y: (p.y + 0.5) / s })), score: bestS, certain, info: { sup: +sup.toFixed(2), cov: +cov.toFixed(2), band: +band.toFixed(2), borders } };
 }
 // an upright rectangle with square corners and sides parallel to the image: a screenshot frame or a photo in a photo
 function isAxisRect(q, W, H){
@@ -306,7 +339,7 @@ function detect(img){
       const r2 = detectMat(inner, x1 - x0, y1 - y0); inner.delete();
       if (r2 && r2.score > 0.12){
         const q2 = r2.quad.map(p => ({ x: p.x + x0, y: p.y + y0 }));
-        res = { quad: q2, score: r2.score, frame: res.quad };
+        res = { quad: q2, score: r2.score, certain: r2.certain, info: r2.info, frame: res.quad };
       }
     }
   }
@@ -315,7 +348,7 @@ function detect(img){
   let o = res.quad.map(p => ({ x: Math.min(W, Math.max(0, p.x)), y: Math.min(H, Math.max(0, p.y)) }));
   const cx = o.reduce((a, p) => a + p.x, 0) / 4, cy = o.reduce((a, p) => a + p.y, 0) / 4, inset = 0.004;
   o = o.map(p => ({ x: Math.min(W, Math.max(0, p.x + (cx - p.x) * inset)), y: Math.min(H, Math.max(0, p.y + (cy - p.y) * inset)) }));
-  return { quad: o, score: res.score };
+  return { quad: o, score: res.score, certain: !!res.certain, info: res.info };
 }
 
 /* ---------- warp ---------- */
@@ -328,7 +361,7 @@ function warp(img, quad, maxSide){
   const from = cv.matFromArray(4, 1, cv.CV_32FC2, [q[0].x, q[0].y, q[1].x, q[1].y, q[2].x, q[2].y, q[3].x, q[3].y]);
   const to = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, W, 0, W, H, 0, H]);
   const M = cv.getPerspectiveTransform(from, to);
-  cv.warpPerspective(src, dst, M, new cv.Size(W, H), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
+  cv.warpPerspective(src, dst, M, new cv.Size(W, H), cv.INTER_CUBIC, cv.BORDER_REPLICATE);
   const out = matToImageData(dst); del(src, dst, from, to, M); return out;
 }
 
