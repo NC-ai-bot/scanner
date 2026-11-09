@@ -352,17 +352,146 @@ function detect(img){
 }
 
 /* ---------- warp ---------- */
-function warp(img, quad, maxSide){
-  const q = order(quad);
+function quadSize(q, maxSide){
   let W = Math.max(dist(q[0], q[1]), dist(q[3], q[2])), H = Math.max(dist(q[0], q[3]), dist(q[1], q[2]));
   const k = Math.min(1, maxSide / Math.max(W, H));
-  W = Math.max(16, Math.round(W * k)); H = Math.max(16, Math.round(H * k));
-  const src = toMat(img), dst = new cv.Mat();
+  return [Math.max(16, Math.round(W * k)), Math.max(16, Math.round(H * k))];
+}
+function quadMatrix(q, W, H){ // 3x3 as a plain array (row-major)
   const from = cv.matFromArray(4, 1, cv.CV_32FC2, [q[0].x, q[0].y, q[1].x, q[1].y, q[2].x, q[2].y, q[3].x, q[3].y]);
   const to = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, W, 0, W, H, 0, H]);
-  const M = cv.getPerspectiveTransform(from, to);
-  cv.warpPerspective(src, dst, M, new cv.Size(W, H), cv.INTER_CUBIC, cv.BORDER_REPLICATE);
-  const out = matToImageData(dst); del(src, dst, from, to, M); return out;
+  const M = cv.getPerspectiveTransform(from, to); const a = Array.from(M.data64F); del(from, to, M); return a;
+}
+function mul3(a, b){ const r = new Array(9); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) r[i*3+j] = a[i*3]*b[j] + a[i*3+1]*b[3+j] + a[i*3+2]*b[6+j]; return r; }
+function warpWith(src, m, W, H){
+  const M = cv.matFromArray(3, 3, cv.CV_64F, m), dst = new cv.Mat();
+  cv.warpPerspective(src, dst, M, new cv.Size(W, H), cv.INTER_CUBIC, cv.BORDER_REPLICATE); M.delete(); return dst;
+}
+/* The four corners are never perfect (curled paper, a sheet lying on top, a corner outside the picture), and then the
+ * page comes out tilted or tapered. The print itself knows what is level: text lines and table rules are horizontal,
+ * margins and table sides are vertical. Measure those on a small copy of the straightened page and return the small
+ * projective correction (in centred coordinates divided by L) that makes them level and upright, or null when the page
+ * does not give a clear answer. */
+function contentCorrection(small){ // small: RGBA mat of the straightened page, ~700 px wide
+  const w = small.cols, h = small.rows, L = Math.max(w, h), cx = w / 2, cy = h / 2;
+  const gray = new cv.Mat(); cv.cvtColor(small, gray, cv.COLOR_RGBA2GRAY);
+  const ink = new cv.Mat(); cv.adaptiveThreshold(gray, ink, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 25, 14);
+  const blobs = (mask, minLen, horizontal) => { // long thin components → {ax,ay,bx,by,len} end points along the main axis
+    const labels = new cv.Mat(), stats = new cv.Mat(), cent = new cv.Mat();
+    const n = cv.connectedComponentsWithStats(mask, labels, stats, cent, 8, cv.CV_32S), ld = labels.data32S, st = stats.data32S;
+    const ok = new Uint8Array(n), acc = new Float64Array(n * 5);
+    for (let i = 1; i < n; i++){ const bw = st[i*5+2], bh = st[i*5+3]; if ((horizontal ? bw : bh) >= minLen && (horizontal ? bh < bw * 0.25 : bw < bh * 0.25)) ok[i] = 1; }
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){ const l = ld[y*w+x]; if (!ok[l]) continue; const o = l*5; acc[o]++; acc[o+1] += x; acc[o+2] += y; acc[o+3] += x*x; acc[o+4] += y*y; }
+    const xy = new Float64Array(n);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){ const l = ld[y*w+x]; if (ok[l]) xy[l] += x*y; }
+    const out = [];
+    for (let i = 1; i < n; i++){
+      if (!ok[i]) continue;
+      const c = acc[i*5], mx = acc[i*5+1]/c, my = acc[i*5+2]/c, sxx = acc[i*5+3]/c - mx*mx, syy = acc[i*5+4]/c - my*my, sxy = xy[i]/c - mx*my;
+      const th = 0.5 * Math.atan2(2 * sxy, sxx - syy), dx = Math.cos(th), dy = Math.sin(th);
+      const major = sxx*dx*dx + 2*sxy*dx*dy + syy*dy*dy, minor = sxx + syy - major;
+      if (minor * 60 > major) continue;                       // not a straight thin thing (handwriting, figures, merged lines)
+      const half = Math.sqrt(3 * major);                       // uniform bar: variance = len²/12
+      if (horizontal ? Math.abs(dy) > 0.2 : Math.abs(dx) > 0.2) continue;
+      out.push({ ax: mx - dx*half, ay: my - dy*half, bx: mx + dx*half, by: my + dy*half, len: 2 * half });
+    }
+    del(labels, stats, cent); return out;
+  };
+  // horizontal evidence: characters smeared into text lines, plus table rules
+  const kh = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(Math.max(9, Math.round(w * 0.035)) | 1, 1));
+  const lines = new cv.Mat(); cv.morphologyEx(ink, lines, cv.MORPH_CLOSE, kh);
+  const k2 = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(Math.max(9, Math.round(w * 0.02)) | 1, 1)); cv.morphologyEx(lines, lines, cv.MORPH_OPEN, k2);
+  const hs = blobs(lines, w * 0.14, true);
+  // vertical evidence: table sides (long vertical rules) …
+  const kv = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(1, Math.max(15, Math.round(h * 0.03)) | 1));
+  const vert = new cv.Mat(); cv.morphologyEx(ink, vert, cv.MORPH_OPEN, kv);
+  const vs = blobs(vert, h * 0.05, false).filter(l => l.ax > 4 && l.ax < w - 5 && l.bx > 4 && l.bx < w - 5); // not the picture border
+  del(gray, ink, kh, k2, kv, lines, vert);
+  // … and margins: many text lines starting (or ending) on one straight line
+  const margin = (pts) => { // pts [{x,y}] → best line x = a + b·y by consensus
+    let best = null; const tol = w * 0.006;
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++){
+      const dy = pts[j].y - pts[i].y; if (Math.abs(dy) < h * 0.12) continue;
+      const b = (pts[j].x - pts[i].x) / dy; if (Math.abs(b) > 0.07) continue; const a = pts[i].x - b * pts[i].y;
+      const inl = pts.filter(p => Math.abs(p.x - a - b * p.y) < tol);
+      if (!best || inl.length > best.length) best = inl;
+    }
+    if (!best || best.length < Math.max(6, pts.length * 0.3)) return null;
+    let y0 = Infinity, y1 = -Infinity; for (const p of best){ y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+    if (y1 - y0 < h * 0.3) return null;
+    // least squares through the inliers
+    let n = best.length, sy = 0, sx = 0, syy = 0, sxy = 0; for (const p of best){ sy += p.y; sx += p.x; syy += p.y*p.y; sxy += p.x*p.y; }
+    const b = (n * sxy - sx * sy) / (n * syy - sy * sy), a = (sx - b * sy) / n;
+    return { ax: a + b * y0, ay: y0, bx: a + b * y1, by: y1, len: (y1 - y0) * 0.6, inl: best };
+  };
+  const textLines = hs.filter(l => l.len < w * 0.97);
+  let lefts = textLines.map(l => ({ x: l.ax, y: l.ay })), rights = textLines.map(l => ({ x: l.bx, y: l.by }));
+  { const m = margin(lefts); if (m) vs.push(m); }
+  if (hs.length < 5) return null;
+  const nrm = l => ({ ax: (l.ax - cx) / L, ay: (l.ay - cy) / L, bx: (l.bx - cx) / L, by: (l.by - cy) / L, w: l.len / L });
+  let H = hs.map(nrm), V = vs.map(nrm);
+  const solve2 = (rows) => { // weighted least squares for 2 unknowns with a little ridge: rows [c1, c2, rhs, weight, ridge2]
+    let a11 = 1e-9, a12 = 0, a22 = 1e-9, b1 = 0, b2 = 0;
+    for (const r of rows){ a11 += r[3]*r[0]*r[0]; a12 += r[3]*r[0]*r[1]; a22 += r[3]*r[1]*r[1]; b1 += r[3]*r[0]*r[2]; b2 += r[3]*r[1]*r[2]; }
+    return [a11, a12, a22, b1, b2];
+  };
+  const apply = (m, x, y) => { const d = m[6]*x + m[7]*y + 1; return [(m[0]*x + m[1]*y) / d, (m[3]*x + m[4]*y) / d]; };
+  let C = [1,0,0, 0,1,0, 0,0,1], keptH = 0, totH = H.reduce((a, l) => a + l.w, 0), nH = 0;
+  for (let it = 0; it < 4; it++){
+    const mapL = l => { const a = apply(C, l.ax, l.ay), b = apply(C, l.bx, l.by); return { ax: a[0], ay: a[1], bx: b[0], by: b[1], w: l.w }; };
+    let h2 = H.map(mapL), v2 = V.map(mapL);
+    // level error of each line now; on later rounds only lines that agree with the majority keep voting
+    const slopeH = l => (l.by - l.ay) / (l.bx - l.ax), slopeV = l => (l.bx - l.ax) / (l.by - l.ay);
+    const tolS = it === 0 ? 0.06 : it === 1 ? 0.03 : 0.012;
+    const med = (arr) => { const s = arr.slice().sort((a, b) => a - b); return s.length ? s[s.length >> 1] : 0; };
+    // compare each line with the local trend, not with zero: remove the fitted part first (round 0 uses the median)
+    const mh = it === 0 ? med(h2.map(slopeH)) : 0, mv = it === 0 ? med(v2.map(slopeV)) : 0;
+    h2 = h2.filter(l => Math.abs(slopeH(l) - mh) < tolS); v2 = v2.filter(l => Math.abs(slopeV(l) - mv) < tolS);
+    keptH = h2.reduce((a, l) => a + l.w, 0); nH = h2.length;
+    if (h2.length < 5 || keptH < totH * 0.5) return null;
+    // horizontals:  t·(xa−xb) + g1·(ya·xb − yb·xa) = yb − ya
+    const rh = solve2(h2.map(l => [l.ax - l.bx, l.ay * l.bx - l.by * l.ax, l.by - l.ay, l.w]));
+    // enough spread in height to tell a tilt from a taper? otherwise only rotate/shear
+    let ymin = Infinity, ymax = -Infinity; for (const l of h2){ ymin = Math.min(ymin, l.ay); ymax = Math.max(ymax, l.ay); }
+    let t, g1;
+    { let [a11, a12, a22, b1, b2] = rh; if (ymax - ymin < 0.3) { t = b1 / a11; g1 = 0; } else { a22 += a11 * 0.002; const det = a11 * a22 - a12 * a12; t = (b1 * a22 - b2 * a12) / det; g1 = (a11 * b2 - a12 * b1) / det; } }
+    // verticals:  s·(ya−yb) + g2·(xa·yb − xb·ya) = xb − xa
+    let sh = 0, g2 = 0;
+    if (v2.length){
+      let [a11, a12, a22, b1, b2] = solve2(v2.map(l => [l.ay - l.by, l.ax * l.by - l.bx * l.ay, l.bx - l.ax, l.w]));
+      let xmin = Infinity, xmax = -Infinity; for (const l of v2){ xmin = Math.min(xmin, l.ax); xmax = Math.max(xmax, l.ax); }
+      if (xmax - xmin < 0.25){ sh = b1 / a11; } else { a22 += a11 * 0.002; const det = a11 * a22 - a12 * a12; sh = (b1 * a22 - b2 * a12) / det; g2 = (a11 * b2 - a12 * b1) / det; }
+    } else sh = -t; // no vertical evidence: a plain rotation
+    C = mul3([1, sh, 0, t, 1, 0, g1, g2, 1], C);
+  }
+  // sanity: a correction, not a new guess
+  const c = [apply(C, -w/2/L, -h/2/L), apply(C, w/2/L, -h/2/L), apply(C, w/2/L, h/2/L), apply(C, -w/2/L, h/2/L)];
+  const o = [[-w/2/L, -h/2/L], [w/2/L, -h/2/L], [w/2/L, h/2/L], [-w/2/L, h/2/L]];
+  let shift = 0; for (let i = 0; i < 4; i++) shift = Math.max(shift, Math.hypot(c[i][0] - o[i][0], c[i][1] - o[i][1]));
+  if (!isFinite(shift) || shift > 0.12) return null;
+  if (root.__cvDebugFix) root.__cvDebugFix({ nH, keptH: +(keptH / totH).toFixed(2), nV: V.length, shift: +shift.toFixed(4), C, Vdbg: vs.map(l => [Math.round(l.ax), Math.round(l.ay), Math.round(l.bx), Math.round(l.by), l.inl ? 'm' + l.inl.length : 'r']) });
+  if (shift < 0.0015) return null; // already straight
+  return { C, L, cx, cy };
+}
+function warp(img, quad, maxSide, noFix){
+  const q = order(quad), [W, H] = quadSize(q, maxSide);
+  const src = toMat(img); let m = quadMatrix(q, W, H);
+  if (!noFix){
+    try {
+      const k = Math.min(1, 720 / W), sw = Math.max(16, Math.round(W * k)), sh = Math.max(16, Math.round(H * k));
+      const ms = mul3([k, 0, 0, 0, k, 0, 0, 0, 1], m);
+      const Ms = cv.matFromArray(3, 3, cv.CV_64F, ms), small = new cv.Mat();
+      cv.warpPerspective(src, small, Ms, new cv.Size(sw, sh), cv.INTER_AREA, cv.BORDER_REPLICATE); Ms.delete();
+      const fix = contentCorrection(small); small.delete();
+      if (fix){ // small-page pixels → centred/normalised → corrected → back to full-size pixels
+        const N = [1 / fix.L, 0, -fix.cx / fix.L, 0, 1 / fix.L, -fix.cy / fix.L, 0, 0, 1];
+        const Ni = [fix.L / k, 0, fix.cx / k, 0, fix.L / k, fix.cy / k, 0, 0, 1];
+        m = mul3(Ni, mul3(fix.C, mul3(N, ms)));
+      }
+    } catch (e) { /* keep the plain four-corner result */ }
+  }
+  const dst = warpWith(src, m, W, H);
+  const out = matToImageData(dst); del(src, dst); return out;
 }
 
 /* ---------- processing ---------- */
